@@ -24,4 +24,7 @@ class VAEConfig:
     # decoder architecture
     decoder_channels: list = field(default_factory=lambda: [32, 16, 8])         # filters for moving ball CNN
     dec_activation: type = nn.ELU                   # activation class for decoder layers
+
+    # alpha network
+    alpha_units: int = 3                   # hidden units in alpha network
     
