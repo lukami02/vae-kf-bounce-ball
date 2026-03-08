@@ -16,8 +16,8 @@ class VAEConfig:
     R_std: float = 0.01                    # standard deviation for observation noise covariance R
 
     # encoder architecture
-    encoder_ball_channels: list = field(default_factory=lambda: [8, 16, 32] )  # filters for moving ball CNN
-    encoder_obstacle_channels: list = [16, 32, 32]  # filters for static obstacle CNN
+    encoder_ball_channels: list = field(default_factory=lambda: [8, 16, 32] )      # filters for moving ball CNN
+    encoder_obstacle_channels: list = field(default_factory=lambda: [16, 32, 32])  # filters for static obstacle CNN
     dim_obstacle: int = 16                          # latent size for obstacle features
     enc_activation: type = nn.ELU                   # activation class for encoder layers
 

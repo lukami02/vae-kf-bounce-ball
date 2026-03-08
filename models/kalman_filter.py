@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 import sys
 sys.path.append("..")
 from config.vae_config import VAEConfig
@@ -25,7 +26,7 @@ class KalmanFilter(nn.Module):
         self.a_0 = nn.Parameter(torch.zeros(cfg.dim_a))                       # [dim_a]
 
         # Noise covariances
-        self.log_Q_diag = nn.Parameter(torch.full((cfg.dim_z,), torch.log(cfg.Q_std)))
+        self.log_Q_diag = nn.Parameter(torch.full((cfg.dim_z,), math.log(cfg.Q_std)))
 
     @property
     def Q(self):

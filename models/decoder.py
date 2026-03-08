@@ -13,6 +13,7 @@ class BallDecoder(nn.Module):
     def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig):
         super().__init__()
         self.cfg = vae_cfg
+        self.sim_cfg = sim_cfg
 
         self.n_upsample = len(vae_cfg.decoder_channels)
         H, W = sim_cfg.size
