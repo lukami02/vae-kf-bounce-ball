@@ -26,6 +26,7 @@ class TrainConfig:
     lambda_pred: float = 1.0       # prediction loss
     lambda_kl: float = 1.0         # KL divergence
     lambda_innov: float = 1.0      # innovation loss
+    lambda_free: float = 1.5       # autoregressive loss
 
     # KL annealing
     kl_annealing: bool = True
@@ -33,6 +34,10 @@ class TrainConfig:
 
     # Prediction loss warmup
     pred_warmup_epochs: int = 50     
+
+    # Free-running training
+    free_running_steps: int = 5     # autoregressive rollout length
+    free_running_warmup: int = 100
 
     # Logging
     log_every: int = 10
@@ -52,3 +57,9 @@ class TrainConfig:
         if epoch < self.pred_warmup_epochs:
             return 0.0
         return self.lambda_pred
+    
+    def get_lambda_free(self, epoch: int) -> float:
+        """Enable free-running loss after a specified epoch"""
+        if epoch < self.free_running_warmup:
+            return 0.0
+        return self.lambda_free

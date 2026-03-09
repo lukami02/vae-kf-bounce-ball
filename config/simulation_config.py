@@ -5,7 +5,7 @@ class SimulationConfig:
     # simulation 
     size: tuple[int, int] = (32, 32)       # (H, W)
     gravity: bool = False                  # enable gravity
-    seed: int | None = None                # RNG seed
+    seed: int = 42                         # RNG seed
     T: int = 60                            # number of frames per episode
     substeps: int = 4                      # number of physics substeps per frame
     episodes: int = 10000                  # number of episodes to generate

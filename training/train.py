@@ -56,9 +56,9 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
         raise ValueError(f"Unknown scheduler: {tcfg.lr_scheduler}")
 
 
-def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
+def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
     model.train()
-    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
+    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0, "free":0}
 
     for batch in loader:
         if len(batch) == 2:
@@ -70,8 +70,11 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
         ball_seq     = ball_seq.to(device)
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
+        if mask is not None:
+            current_mask = mask.expand(batch[0].shape[0], -1)
+        else: current_mask = None
 
-        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq)
+        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -87,6 +90,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
+            mask       = current_mask
         )
 
         optimizer.zero_grad()
@@ -104,9 +108,9 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
 
 
 @torch.no_grad()
-def eval_epoch(model, loader, cfg, tcfg, epoch, device):
+def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
     model.eval()
-    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
+    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0, "free":0}
 
     for batch in loader:
         if len(batch) == 2:
@@ -118,9 +122,11 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, device):
         ball_seq     = ball_seq.to(device)
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
+        if mask is not None:
+            current_mask = mask.expand(batch[0].shape[0], -1)
+        else: current_mask = None
 
-        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq)
-
+        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
         _, terms = compute_loss(
             ball_seq   = ball_seq,
             x_hat_filt = x_hat_filt,
@@ -135,6 +141,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, device):
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
+            mask       = current_mask
         )
 
         for k, v in terms.items():
@@ -175,8 +182,14 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
 
     for epoch in range(1, tcfg.epochs + 1):
 
-        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device)
-        val_terms   = eval_epoch(model, val_loader, cfg, tcfg, epoch, device)
+        mask_val = torch.ones(sim_cfg.T, device=device)
+        mask_val[sim_cfg.T - tcfg.free_running_steps:] = 0.0
+        if epoch >= tcfg.free_running_warmup:
+            mask = mask_val.clone()
+        else:
+            mask = None
+        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
+        val_terms   = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
 
         if scheduler is not None:
             scheduler.step()
@@ -190,7 +203,8 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                 f"recon={train_terms['recon']:.4f}  "
                 f"pred={train_terms['pred']:.4f}  "
                 f"kl={train_terms['kl']:.4f}  "
-                f"innov={train_terms['innov']:.4f} | "
+                f"innov={train_terms['innov']:.4f} "
+                f"free={train_terms['free']:.4f} | "
                 f"val_loss={val_terms['loss']:.4f}"
             )
 
@@ -222,8 +236,8 @@ if __name__ == "__main__":
 
     model = KVAE(cfg, sim_cfg)
 
-    train_dataset = BallDataset(split="train")
-    val_dataset   = BallDataset(split="val")
+    train_dataset = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="train")
+    val_dataset   = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="val")
 
     train_loader = DataLoader(train_dataset, batch_size=tcfg.batch_size, shuffle=True,  num_workers=4)
     val_loader   = DataLoader(val_dataset,   batch_size=tcfg.batch_size, shuffle=False, num_workers=4)
