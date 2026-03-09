@@ -9,6 +9,7 @@ from config.simulation_config import SimulationConfig
 from config.train_config import TrainConfig
 from models.kvae import KVAE
 from training.loss import compute_loss
+from dataset.dataset import BallDataset
 
 
 def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.Logger:
@@ -55,7 +56,7 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
         raise ValueError(f"Unknown scheduler: {tcfg.lr_scheduler}")
 
 
-def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device, logger):
+def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
     model.train()
     total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
 
@@ -103,7 +104,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, device, logger):
 
 
 @torch.no_grad()
-def eval_epoch(model, loader, cfg, tcfg, epoch, device, logger):
+def eval_epoch(model, loader, cfg, tcfg, epoch, device):
     model.eval()
     total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
 
@@ -174,8 +175,8 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
 
     for epoch in range(1, tcfg.epochs + 1):
 
-        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device, logger)
-        val_terms   = eval_epoch(model, val_loader, cfg, tcfg, epoch, device, logger)
+        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device)
+        val_terms   = eval_epoch(model, val_loader, cfg, tcfg, epoch, device)
 
         if scheduler is not None:
             scheduler.step()
@@ -211,15 +212,13 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
 
 
 if __name__ == "__main__":
-    from data.dataset import BallDataset
-
-    torch.manual_seed(42)
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
     tcfg    = TrainConfig()
     logger  = setup_logger(log_dir="logs", log_file="train.log")
+    torch.manual_seed(sim_cfg.seed)
 
     model = KVAE(cfg, sim_cfg)
 

@@ -11,6 +11,8 @@ class TrainConfig:
     learning_rate: float = 1e-3
     grad_clip: float = 5.0
     seed: int = 42
+    val_split:  float = 0.1    
+    test_split: float = 0.1
 
     # Optimizer
     optimizer: str   = "adam"     

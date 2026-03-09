@@ -197,7 +197,7 @@ class BouncingBallSim:
             obstacle_data[i] = obstacle_frame 
 
             if i % 1000 == 0:
-                print(f"Generisana epizoda {i}/{self.cfg.episodes}")
+                print(f"Generated episode {i+1}/{self.cfg.episodes}")
 
         return ball_data, obstacle_data
     
