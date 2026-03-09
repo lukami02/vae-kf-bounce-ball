@@ -102,13 +102,12 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
 
     loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * L_innov)
 
-    """
     terms = {
         "loss": loss.item(),
         "recon": L_recon.item(),
         "pred": L_pred.item(),
         "kl": L_kl.item(),
         "innov": L_innov.item(),
-    }"""
+    }
 
-    return loss
+    return loss, terms

@@ -9,7 +9,7 @@ class TrainConfig:
     epochs: int = 200
     batch_size: int = 64
     learning_rate: float = 1e-3
-    grad_clip: float = 1.0
+    grad_clip: float = 5.0
     seed: int = 42
 
     # Optimizer
