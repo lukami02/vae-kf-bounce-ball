@@ -6,16 +6,16 @@ import torch.optim as optim
 class TrainConfig:
 
     # Training
-    epochs: int = 200
-    batch_size: int = 64
+    epochs: int = 100
+    batch_size: int = 128
     learning_rate: float = 1e-3
     grad_clip: float = 5.0
     seed: int = 42
     val_split:  float = 0.1    
-    test_split: float = 0.1
+    test_split: float = 0.01
 
     # Optimizer
-    optimizer: str   = "adam"     
+    optimizer: str   = "adamw"     
     weight_decay: float = 1e-4       
     lr_scheduler: str = "cosine" 
     lr_step_size: int = 50 
@@ -23,21 +23,21 @@ class TrainConfig:
 
     # Loss weights
     lambda_recon: float = 1.0      # reconstruction loss
-    lambda_pred: float = 1.0       # prediction loss
-    lambda_kl: float = 1.0         # KL divergence
-    lambda_innov: float = 1.0      # innovation loss
+    lambda_pred: float = 0.8       # prediction loss
+    lambda_kl: float = 0.5         # KL divergence
+    lambda_innov: float = 0.05     # innovation loss
     lambda_free: float = 1.5       # autoregressive loss
 
     # KL annealing
     kl_annealing: bool = True
-    kl_warmup_epochs: int = 50  
+    kl_warmup_epochs: int = 20  
 
     # Prediction loss warmup
-    pred_warmup_epochs: int = 50     
+    pred_warmup_epochs: int = 20     
 
     # Free-running training
-    free_running_steps: int = 5     # autoregressive rollout length
-    free_running_warmup: int = 100
+    free_running_steps: int = 10     # autoregressive rollout length
+    free_running_warmup: int = 40
 
     # Logging
     log_every: int = 10
