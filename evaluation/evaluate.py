@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import argparse
 import os
 import sys
 import logging
@@ -8,7 +9,10 @@ from torch.utils.data import DataLoader
 from config.vae_config import VAEConfig
 from config.simulation_config import SimulationConfig
 from config.train_config import TrainConfig
+from training.train import setup_logger
 from models.kvae import KVAE
+from models.cv_vae import CVVAE
+from models.gru_vae import GRUVAE
 from dataset.dataset import BallDataset
 from utils.visualize import (
     plot_trajectories,
@@ -25,8 +29,23 @@ def to_numpy(x):
         return x.detach().cpu().numpy()
     return x
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="kvae", choices=["kvae", "gru_vae", "cv_vae"])
+    parser.add_argument("--checkpoint", type=str, default=None)
+    parser.add_argument("--results_dir",type=str, default=None)
+    return parser.parse_args()
 
-def load_model(checkpoint_path, cfg, sim_cfg, device):
+
+def load_model(checkpoint_path, model_name, cfg, sim_cfg, device):
+    if model_name == "kvae":
+        model = KVAE(cfg, sim_cfg)
+    elif model_name == "gru_vae":
+        model = GRUVAE(cfg, sim_cfg)
+    elif model_name == "cv_vae":
+        model = CVVAE(cfg, sim_cfg)
+    else: 
+        raise ValueError(f"Unknown model: {model_name}")
     model = KVAE(cfg, sim_cfg).to(device)
     ckpt  = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model"])
@@ -141,7 +160,7 @@ def compute_metrics(model, loader, device):
     return {k: v / count for k, v in total.items()}
 
 
-def evaluate(checkpoint_path, results_dir, cfg, sim_cfg, tcfg, device, max_pred_steps=10, n_samples=3):
+def evaluate(checkpoint_path, model_name, results_dir, cfg, sim_cfg, tcfg, device, max_pred_steps=10, n_samples=3):
     """
     Main evaluation pipeline:
         Load pre-trained model checkpoint.
@@ -152,7 +171,7 @@ def evaluate(checkpoint_path, results_dir, cfg, sim_cfg, tcfg, device, max_pred_
     os.makedirs(results_dir, exist_ok=True)
 
     # Model
-    model = load_model(checkpoint_path, cfg, sim_cfg, device)
+    model = load_model(checkpoint_path, model_name, cfg, sim_cfg, device)
 
     # Dataset
     test_dataset = BallDataset(sim_cfg, tcfg, split="test")
@@ -199,21 +218,26 @@ def evaluate(checkpoint_path, results_dir, cfg, sim_cfg, tcfg, device, max_pred_
 
 
 if __name__ == "__main__":
-    from training.train import setup_logger
-
+    args = parse_args()
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    cfg     = VAEConfig()
+
+    cfg = VAEConfig()
     sim_cfg = SimulationConfig()
-    tcfg    = TrainConfig()
-    logger  = setup_logger(log_dir="logs", log_file="evaluate.log")
+    tcfg = TrainConfig()
+
+    checkpoint = args.checkpoint or f"checkpoints/{args.model}/best.pt"
+    results = args.results_dir or f"results/{args.model}"
+    
+    logger = setup_logger(log_dir=f"logs/{args.model}", log_file="evaluate.log")
 
     evaluate(
-        checkpoint_path = "checkpoints/best.pt",
+        checkpoint_path = checkpoint,
+        load_model      = args.model,
         results_dir     = "results/",
         cfg             = cfg,
         sim_cfg         = sim_cfg,
         tcfg            = tcfg,
         device          = device,
-        max_pred_steps  = 10,
-        n_samples   = 5,
+        max_pred_steps  = tcfg.free_running_steps,
+        n_samples       = 5,
     )

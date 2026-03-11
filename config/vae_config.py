@@ -9,6 +9,10 @@ class VAEConfig:
     dim_u: int = 0                         # dimension of control input (set to 0 if not used)
     num_matrices: int = 3                  # number of different matrices to experiment with
 
+    # GRU dimension
+    gru_hidden_dim: int = 16
+    gru_layers: int = 2
+
     # standard deviations for initialization 
     B_std: float = 0.01                    # standard deviation for B matrices
     C_std: float = 0.01                    # standard deviation for C matrices

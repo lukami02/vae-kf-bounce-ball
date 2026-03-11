@@ -72,47 +72,51 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
         n_free = free_mask.sum().clamp(min=1)
         L_free = ((x_hat_filt - ball_seq) ** 2 * free_mask).sum() / n_free
 
-    # KL divergence  —  KL(q(a|x) || p(a|z))
-    # p(a_k|z_k) = N(C_k @ z_pred_k, R_kalman)
+    if z_pred is not None and P_pred is not None: # KVAE
+        # KL divergence  —  KL(q(a|x) || p(a|z))
+        # p(a_k|z_k) = N(C_k @ z_pred_k, R_kalman)
 
-    # Kalman prior mean: mu_p = C_k @ z_pred_k
-    w = alpha_seq.unsqueeze(-1).unsqueeze(-1)                              # [B, T, K, 1, 1]
-    C_seq = (w * C_matrices.unsqueeze(0).unsqueeze(0)).sum(dim=2)          # [B, T, dim_a, dim_z]
-    mu_p  = torch.bmm(
-                C_seq.view(B * T, cfg.dim_a, cfg.dim_z),
-                z_pred.view(B * T, cfg.dim_z, 1)
-            ).squeeze(-1)                                                  # [B*T, dim_a]
+        # Kalman prior mean: mu_p = C_k @ z_pred_k
+        w = alpha_seq.unsqueeze(-1).unsqueeze(-1)                              # [B, T, K, 1, 1]
+        C_seq = (w * C_matrices.unsqueeze(0).unsqueeze(0)).sum(dim=2)          # [B, T, dim_a, dim_z]
+        mu_p  = torch.bmm(
+                    C_seq.view(B * T, cfg.dim_a, cfg.dim_z),
+                    z_pred.view(B * T, cfg.dim_z, 1)
+                ).squeeze(-1)                                                  # [B*T, dim_a]
 
-    # Kalman prior variance: var_p = C_k @ P_pred_k @ C_k^T + a_va
-    C_flat   = C_seq.view(B * T, cfg.dim_a, cfg.dim_z)                     # [B*T, dim_a, dim_z]
-    P_flat   = P_pred.view(B * T, cfg.dim_z, cfg.dim_z)                    # [B*T, dim_z, dim_z]
-    CP       = torch.bmm(C_flat, P_flat)                                   # [B*T, dim_a, dim_z]
-    CPCt     = torch.bmm(CP, C_flat.transpose(1, 2))                       # [B*T, dim_a, dim_a]
-    var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + a_var + 1e-8       # [B*T, dim_a]
+        # Kalman prior variance: var_p = C_k @ P_pred_k @ C_k^T + a_va
+        C_flat   = C_seq.view(B * T, cfg.dim_a, cfg.dim_z)                     # [B*T, dim_a, dim_z]
+        P_flat   = P_pred.view(B * T, cfg.dim_z, cfg.dim_z)                    # [B*T, dim_z, dim_z]
+        CP       = torch.bmm(C_flat, P_flat)                                   # [B*T, dim_a, dim_z]
+        CPCt     = torch.bmm(CP, C_flat.transpose(1, 2))                       # [B*T, dim_a, dim_a]
+        var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + a_var + 1e-8       # [B*T, dim_a]
 
-    if mask is not None:
-        obs_mask_bt = mask.contiguous().reshape(B * T)   
-        L_kl = (kl_divergence_gaussian(a_mu, a_var, mu_p, var_p) * obs_mask_bt).mean()
+        if mask is not None:
+            obs_mask_bt = mask.contiguous().reshape(B * T)   
+            L_kl = (kl_divergence_gaussian(a_mu, a_var, mu_p, var_p) * obs_mask_bt).mean()
+        else:
+            L_kl = kl_divergence_gaussian(a_mu, a_var, mu_p, var_p).mean()
+
+        # Innovation loss 
+        # r_k = a_k - C_k @ z_pred_k
+        # S_k = C_k @ P_pred @ C_k^T + R_k
+
+        # Innovation
+        a_seq_bt = a_mu.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
+        r_k = a_seq_bt - a_filt                                                 # [B, T, dim_a]
+
+        # S_k = CPCt + R_k
+        R_k  = torch.diag_embed(a_var.view(B, T, cfg.dim_a))                    # [B, T, dim_a, dim_a]
+        S_k  = CPCt.view(B, T, cfg.dim_a, cfg.dim_a) + R_k                      # [B, T, dim_a, dim_a]
+
+        if mask is not None:
+            obs_mask = mask.unsqueeze(-1)                                       # [B, T, 1]
+            r_k = r_k * obs_mask                                                # [B, T, dim_a]
+
+        L_innov = innovation_loss(r_k, S_k)
     else:
-        L_kl = kl_divergence_gaussian(a_mu, a_var, mu_p, var_p).mean()
-
-    # Innovation loss 
-    # r_k = a_k - C_k @ z_pred_k
-    # S_k = C_k @ P_pred @ C_k^T + R_k
-
-    # Innovation
-    a_seq_bt = a_mu.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
-    r_k = a_seq_bt - a_filt                                                 # [B, T, dim_a]
-
-    # S_k = CPCt + R_k
-    R_k  = torch.diag_embed(a_var.view(B, T, cfg.dim_a))                    # [B, T, dim_a, dim_a]
-    S_k  = CPCt.view(B, T, cfg.dim_a, cfg.dim_a) + R_k                      # [B, T, dim_a, dim_a]
-
-    if mask is not None:
-        obs_mask = mask.unsqueeze(-1)                                       # [B, T, 1]
-        r_k = r_k * obs_mask                                                # [B, T, dim_a]
-
-    L_innov = innovation_loss(r_k, S_k)
+        L_kl    = torch.tensor(0.0)
+        L_innov = torch.tensor(0.0)
 
     # Weighted sum sa annealing
     lam_kl   = tcfg.get_lambda_kl(epoch)

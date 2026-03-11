@@ -12,12 +12,8 @@ from models.alphanetwork import AlphaNetwork
 
 class KVAE(nn.Module):
     def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig):
-        super().__init__()
-        self.cfg = cfg
+        super().__init__(cfg, sim_cfg)
 
-        self.ball_encoder     = BallEncoder(cfg, sim_cfg)
-        self.obstacle_encoder = ObstacleEncoder(cfg, sim_cfg)
-        self.decoder          = BallDecoder(cfg, sim_cfg)
         self.alpha_net        = AlphaNetwork(cfg)
         self.kalman           = KalmanFilter(cfg)
 
@@ -27,25 +23,11 @@ class KVAE(nn.Module):
         # Observation matrices [K, dim_a, dim_z]
         self.C_matrices = nn.Parameter(cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z))
 
-        # Control matrices [K, dim_z, dim_u] — samo ako postoji control input
+        # Control matrices [K, dim_z, dim_u]
         if cfg.dim_u > 0:
             self.B_matrices = nn.Parameter(cfg.B_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_u))
         else:
             self.B_matrices = None
-
-    def encode(self, ball_seq, obstacle_img):
-        """
-        Encode ball sequence and obstacle image.
-        """
-        a_seq, a_mu, a_var = self.ball_encoder(ball_seq)
-        h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))  # [B, dim_obstacle]
-        return a_seq, a_mu, a_var, h_obs
-
-    def decode(self, a_seq):
-        """
-        Decode latent sequence to ball images.
-        """
-        return self.decoder(a_seq)
 
     def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None):
         B, T, H, W = ball_seq.shape

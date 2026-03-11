@@ -1,5 +1,6 @@
 import torch
 import logging
+import argparse
 import os
 import sys
 sys.path.append("..")
@@ -8,9 +9,26 @@ from config.vae_config import VAEConfig
 from config.simulation_config import SimulationConfig
 from config.train_config import TrainConfig
 from models.kvae import KVAE
+from models.cv_vae import CVVAE
+from models.gru_vae import GRUVAE
 from training.loss import compute_loss
 from dataset.dataset import BallDataset
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="kvae", choices=["kvae", "gru_vae", "cv_vae"])
+    parser.add_argument("--checkpoint", type=str, default=None, help="Continue training from checkpoint")
+    return parser.parse_args()
+
+def build_model(model_name, cfg, sim_cfg):
+    if model_name == "kvae":
+        return KVAE(cfg, sim_cfg)
+    elif model_name == "gru_vae":
+        return GRUVAE(cfg, sim_cfg)
+    elif model_name == "cv_vae":
+        return CVVAE(cfg, sim_cfg)
+    else:
+        raise ValueError(f"Unknown model: {model_name}")
 
 def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.Logger:
     os.makedirs(log_dir, exist_ok=True)
@@ -226,15 +244,26 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
 
 
 if __name__ == "__main__":
+    args    = parse_args()
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
     tcfg    = TrainConfig()
-    logger  = setup_logger(log_dir="logs", log_file="train.log")
+
+    tcfg.checkpoint_dir = f"checkpoints/{args.model}"
+
+    logger = setup_logger(log_dir=f"logs/{args.model}", log_file="train.log")
+    logger.info(f"Model: {args.model}")
+    
     torch.manual_seed(sim_cfg.seed)
 
     model = KVAE(cfg, sim_cfg)
+
+    if args.checkpoint is not None:
+        ckpt = torch.load(args.checkpoint, map_location=device)
+        model.load_state_dict(ckpt["model"])
+        logger.info(f"Ucitan checkpoint: {args.checkpoint}")
 
     train_dataset = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="train")
     val_dataset   = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="val")
