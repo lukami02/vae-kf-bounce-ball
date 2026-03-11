@@ -91,7 +91,7 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + a_var + 1e-8       # [B*T, dim_a]
 
     if mask is not None:
-        obs_mask_bt = mask.view(B * T)   
+        obs_mask_bt = mask.contiguous().reshape(B * T)   
         L_kl = (kl_divergence_gaussian(a_mu, a_var, mu_p, var_p) * obs_mask_bt).mean()
     else:
         L_kl = kl_divergence_gaussian(a_mu, a_var, mu_p, var_p).mean()
