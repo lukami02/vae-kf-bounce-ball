@@ -104,7 +104,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             P_pred     = P_pred,
             a_filt     = a_filt,
             alpha_seq  = alpha_seq,
-            C_matrices = model.C_matrices,
+            C_matrices = getattr(model, 'C_matrices', None),
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
@@ -126,7 +126,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
 
 
 @torch.no_grad()
-def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
+def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
     model.eval()
     total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0, "free":0}
 
@@ -155,7 +155,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
             P_pred     = P_pred,
             a_filt     = a_filt,
             alpha_seq  = alpha_seq,
-            C_matrices = model.C_matrices,
+            C_matrices = getattr(model, 'C_matrices', None),
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
@@ -205,9 +205,11 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
         if epoch >= tcfg.free_running_warmup:
             mask = mask_val.clone()
         else:
-            mask = None
+            mask = torch.ones(sim_cfg.T, device=device)
+            idx = int(sim_cfg.T - (epoch / tcfg.free_running_warmup * tcfg.free_running_steps))
+            mask_val[idx:] = 0.0
         train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
-        val_terms   = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
+        val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
 
         if scheduler is not None:
             scheduler.step()
@@ -258,8 +260,8 @@ if __name__ == "__main__":
     
     torch.manual_seed(sim_cfg.seed)
 
-    model = KVAE(cfg, sim_cfg)
-
+    model = build_model(args.model, cfg, sim_cfg)
+    
     if args.checkpoint is not None:
         ckpt = torch.load(args.checkpoint, map_location=device)
         model.load_state_dict(ckpt["model"])

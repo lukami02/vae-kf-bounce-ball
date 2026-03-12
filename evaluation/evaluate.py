@@ -46,7 +46,7 @@ def load_model(checkpoint_path, model_name, cfg, sim_cfg, device):
         model = CVVAE(cfg, sim_cfg)
     else: 
         raise ValueError(f"Unknown model: {model_name}")
-    model = KVAE(cfg, sim_cfg).to(device)
+
     ckpt  = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model"])
     model.eval()
@@ -78,7 +78,7 @@ def predict_multistep(model, ball_seq, obstacle_img, n_steps, device):
         "a_pred_free": to_numpy(a_filt[0, T - n_steps:]),
         "x_hat_filt":  to_numpy(x_hat_filt[0]),
         "x_hat_pred":  to_numpy(x_hat_pred[0]),
-        "alpha_seq":   to_numpy(alpha_seq[0]),
+        "alpha_seq": to_numpy(alpha_seq[0]) if alpha_seq is not None else None,
         "ball_seq":    to_numpy(ball_seq[0]),
     }
 
@@ -207,7 +207,7 @@ def evaluate(checkpoint_path, model_name, results_dir, cfg, sim_cfg, tcfg, devic
 
         plot_reconstruction_grid(ball_seq=out["ball_seq"], x_hat_filt=out["x_hat_filt"], x_hat_pred=out["x_hat_pred"], save_path=os.path.join(sample_dir, "reconstruction.png"))
 
-        plot_alpha(alpha_seq = out["alpha_seq"], save_path = os.path.join(sample_dir, "alpha.png"))
+        if model_name == "kvae": plot_alpha(alpha_seq = out["alpha_seq"], save_path = os.path.join(sample_dir, "alpha.png"))
 
         plot_latent_space(a_mu=out["a_mu"], a_filt=out["a_filt"], save_path=os.path.join(sample_dir, "latent_space.png"))
 
@@ -232,7 +232,7 @@ if __name__ == "__main__":
 
     evaluate(
         checkpoint_path = checkpoint,
-        load_model      = args.model,
+        model_name      = args.model,
         results_dir     = "results/",
         cfg             = cfg,
         sim_cfg         = sim_cfg,

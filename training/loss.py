@@ -41,7 +41,7 @@ def innovation_loss(r_k, S_k):
 
 
 def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred, a_filt, alpha_seq, C_matrices,
-                cfg: VAEConfig, tcfg: TrainConfig, epoch: int, mask=None):
+                cfg: VAEConfig, tcfg: TrainConfig, epoch: int, mask=None, train=True):
     """
     ball_seq,       # [B, T, H, W]     — ground truth
     x_hat_filt,     # [B, T, H, W]     — reconstruction from a_filt
@@ -118,10 +118,13 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
         L_kl    = torch.tensor(0.0)
         L_innov = torch.tensor(0.0)
 
-    # Weighted sum sa annealing
+    # Weighted sum
     lam_kl   = tcfg.get_lambda_kl(epoch)
     lam_pred = tcfg.get_lambda_pred(epoch)
-    lam_free = tcfg.get_lambda_free(epoch)
+    if train:
+        lam_free = tcfg.get_lambda_free(epoch)
+    else:
+        lam_free = tcfg.lambda_free
 
     loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * L_innov + lam_free * L_free)
 

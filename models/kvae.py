@@ -4,13 +4,14 @@ import sys
 sys.path.append("..")
 from config.vae_config import VAEConfig
 from config.simulation_config import SimulationConfig
+from models.base_vae import BaseVAE
 from models.encoder import BallEncoder, ObstacleEncoder
 from models.decoder import BallDecoder
 from models.kalman_filter import KalmanFilter
 from models.alphanetwork import AlphaNetwork
 
 
-class KVAE(nn.Module):
+class KVAE(BaseVAE):
     def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig):
         super().__init__(cfg, sim_cfg)
 
