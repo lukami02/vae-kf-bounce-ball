@@ -20,7 +20,7 @@ class KalmanFilter(nn.Module):
 
         # init state
         self.z_0     = nn.Parameter(torch.zeros(cfg.dim_z))                   # [dim_z]
-        self.P_0     = nn.Parameter(torch.eye(cfg.dim_z))                     # [dim_z, dim_z]
+        self.P_0_log_diag = nn.Parameter(torch.zeros(cfg.dim_z))              # [dim_z, dim_z]
 
         # init output
         self.a_0 = nn.Parameter(torch.zeros(cfg.dim_a))                       # [dim_a]
@@ -31,6 +31,10 @@ class KalmanFilter(nn.Module):
     @property
     def Q(self):
         return torch.diag(torch.exp(self.log_Q_diag))                         # [dim_z, dim_z]
+
+    @property
+    def P_0(self):
+        return torch.diag(torch.exp(self.P_0_log_diag))
 
     def forward(self, a_seq, a_var, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None):
         """

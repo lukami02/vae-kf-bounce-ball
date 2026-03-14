@@ -76,7 +76,7 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
 
 def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
     model.train()
-    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0, "free":0}
+    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
 
     for batch in loader:
         if len(batch) == 2:
@@ -128,7 +128,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
 @torch.no_grad()
 def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
     model.eval()
-    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0, "free":0}
+    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
 
     for batch in loader:
         if len(batch) == 2:
@@ -204,10 +204,15 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
         mask_val[sim_cfg.T - tcfg.free_running_steps:] = 0.0
         if epoch >= tcfg.free_running_warmup:
             mask = mask_val.clone()
+            rand_mask = torch.rand(sim_cfg.T, device=device) < tcfg.p_mask
+            rand_mask[:0.2*sim_cfg.T] = False
+            mask[rand_mask] = 0.0
         else:
             mask = torch.ones(sim_cfg.T, device=device)
-            idx = int(sim_cfg.T - (epoch / tcfg.free_running_warmup * tcfg.free_running_steps))
-            mask_val[idx:] = 0.0
+            rand_mask = torch.rand(sim_cfg.T, device=device) < tcfg.p_mask
+            rand_mask[:0.2*sim_cfg.T] = False
+            mask[rand_mask] = 0.0
+
         train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
         val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
 
@@ -223,8 +228,7 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                 f"recon={train_terms['recon']:.4f}  "
                 f"pred={train_terms['pred']:.4f}  "
                 f"kl={train_terms['kl']:.4f}  "
-                f"innov={train_terms['innov']:.4f} "
-                f"free={train_terms['free']:.4f} | "
+                f"innov={train_terms['innov']:.4f} | "
                 f"val_loss={val_terms['loss']:.4f}"
             )
 
@@ -238,6 +242,9 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
             save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
                             path=f"{tcfg.checkpoint_dir}/best.pt")
             logger.info(f"  New best val loss: {best_val_loss:.4f}")
+
+    save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
+                    path=f"{tcfg.checkpoint_dir}/best.pt")
 
     logger.info("=" * 60)
     logger.info(f"Training done. Best val loss: {best_val_loss:.4f}")
@@ -265,7 +272,7 @@ if __name__ == "__main__":
     if args.checkpoint is not None:
         ckpt = torch.load(args.checkpoint, map_location=device)
         model.load_state_dict(ckpt["model"])
-        logger.info(f"Ucitan checkpoint: {args.checkpoint}")
+        logger.info(f"Checkpoint loaded: {args.checkpoint}")
 
     train_dataset = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="train")
     val_dataset   = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="val")

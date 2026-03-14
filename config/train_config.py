@@ -22,22 +22,23 @@ class TrainConfig:
     lr_gamma: float = 0.5       
 
     # Loss weights
-    lambda_recon: float = 0.8      # reconstruction loss
-    lambda_pred: float = 1.0       # prediction loss
-    lambda_kl: float = 1.5         # KL divergence
-    lambda_innov: float = 0.3      # innovation loss
+    lambda_recon: float = 0.15     # reconstruction loss
+    lambda_pred: float = 0.15      # prediction loss
+    lambda_kl: float = 1           # KL divergence
+    lambda_innov: float = 1        # innovation loss
     lambda_free: float = 1.0       # autoregressive loss
 
     # KL annealing
     kl_annealing: bool = True
-    kl_warmup_epochs: int = 5  
+    kl_warmup_epochs: int = 10  
 
     # Prediction loss warmup
-    pred_warmup_epochs: int = 5     
+    pred_warmup_epochs: int = 10     
 
     # Free-running training
     free_running_steps: int = 10     # autoregressive rollout length
-    free_running_warmup: int = 10
+    free_running_warmup: int = 20
+    p_mask: float = 0.1
 
     # Logging
     log_every: int = 5

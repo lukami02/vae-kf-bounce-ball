@@ -46,7 +46,7 @@ def load_model(checkpoint_path, model_name, cfg, sim_cfg, device):
         model = CVVAE(cfg, sim_cfg)
     else: 
         raise ValueError(f"Unknown model: {model_name}")
-
+    model = model.to(device)
     ckpt  = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model"])
     model.eval()

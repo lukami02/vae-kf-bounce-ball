@@ -35,9 +35,9 @@ def innovation_loss(r_k, S_k):
     mahal = mahal.squeeze(-1).squeeze(-1)                          # [B*T]
 
     # log|S|
-    #log_det = torch.linalg.slogdet(S)[1]                           # [B*T]
+    log_det = torch.linalg.slogdet(S)[1]                           # [B*T]
 
-    return mahal.mean()
+    return (mahal + log_det).mean()
 
 
 def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred, a_filt, alpha_seq, C_matrices,
@@ -57,20 +57,10 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     B, T, H, W = ball_seq.shape
 
     # Reconstruction loss  —  E_q[log p(x | a_filt)]
-    if mask is not None:
-        m = mask.unsqueeze(-1).unsqueeze(-1)      
-        L_recon = F.mse_loss(x_hat_filt * m, ball_seq * m)
-    else:
-        L_recon = F.mse_loss(x_hat_filt, ball_seq)
+    L_recon = F.mse_loss(x_hat_filt, ball_seq)
 
     # Prediction loss  —  E_q[log p(x_{k+1} | a_pred_k)]
     L_pred = F.mse_loss(x_hat_pred[:, :-1], ball_seq[:, 1:])
-
-    L_free = torch.tensor(0.0, device=ball_seq.device)
-    if mask is not None:
-        free_mask = (1.0 - mask).unsqueeze(-1).unsqueeze(-1)       
-        n_free = free_mask.sum().clamp(min=1)
-        L_free = ((x_hat_filt - ball_seq) ** 2 * free_mask).sum() / n_free
 
     if z_pred is not None and P_pred is not None: # KVAE
         # KL divergence  —  KL(q(a|x) || p(a|z))
@@ -92,8 +82,9 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
         var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + a_var + 1e-8       # [B*T, dim_a]
 
         if mask is not None:
-            obs_mask_bt = mask.contiguous().reshape(B * T)   
-            L_kl = (kl_divergence_gaussian(a_mu, a_var, mu_p, var_p) * obs_mask_bt).mean()
+            obs_mask_bt = mask.contiguous().reshape(B * T)
+            L_kl = (kl_divergence_gaussian(a_mu, a_var, mu_p, var_p) * obs_mask_bt).sum() \
+                / obs_mask_bt.sum().clamp(min=1)             
         else:
             L_kl = kl_divergence_gaussian(a_mu, a_var, mu_p, var_p).mean()
 
@@ -103,12 +94,13 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
 
         # Innovation
         a_seq_bt = a_mu.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
-        r_k = a_seq_bt - a_filt                                                 # [B, T, dim_a]
+        mu_p_seq = mu_p.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
+        r_k = a_seq_bt - mu_p_seq                                               # [B, T, dim_a]
 
         # S_k = CPCt + R_k
         R_k  = torch.diag_embed(a_var.view(B, T, cfg.dim_a))                    # [B, T, dim_a, dim_a]
         S_k  = CPCt.view(B, T, cfg.dim_a, cfg.dim_a) + R_k                      # [B, T, dim_a, dim_a]
-
+    
         if mask is not None:
             obs_mask = mask.unsqueeze(-1)                                       # [B, T, 1]
             r_k = r_k * obs_mask                                                # [B, T, dim_a]
@@ -121,20 +113,15 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     # Weighted sum
     lam_kl   = tcfg.get_lambda_kl(epoch)
     lam_pred = tcfg.get_lambda_pred(epoch)
-    if train:
-        lam_free = tcfg.get_lambda_free(epoch)
-    else:
-        lam_free = tcfg.lambda_free
 
-    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * L_innov + lam_free * L_free)
+    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * L_innov)
 
     terms = {
         "loss": loss.item(),
         "recon": L_recon.item(),
         "pred": L_pred.item(),
         "kl": L_kl.item(),
-        "innov": L_innov.item(),
-        "free":  L_free.item(),
+        "innov": L_innov.item()
     }
 
     return loss, terms
