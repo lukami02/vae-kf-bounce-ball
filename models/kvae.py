@@ -40,7 +40,7 @@ class KVAE(BaseVAE):
         B, T, H, W = ball_seq.shape
 
         # Encode
-        a_seq, a_mu, a_var = self.ball_encoder(ball_seq)               # a_seq: [B, T, dim_a]
+        a_seq, a_mu, a_var = self.ball_encoder(ball_seq, obstacle_img.unsqueeze(1)) # a_seq: [B, T, dim_a]
         h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))        # [B, dim_obstacle]
 
         a_var_seq = a_var.view(B, T, self.cfg.dim_a)
