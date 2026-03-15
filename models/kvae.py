@@ -19,7 +19,8 @@ class KVAE(BaseVAE):
         self.kalman           = KalmanFilter(cfg)
 
         # State transition matrices [K, dim_z, dim_z]
-        self.A_matrices = nn.Parameter(torch.stack([torch.eye(cfg.dim_z) for _ in range(cfg.num_matrices)]))
+        self.A_matrices = nn.Parameter(
+            (1.0 - cfg.A_std) * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_z) + cfg.A_std * torch.eye(cfg.dim_z))
 
         # Observation matrices [K, dim_a, dim_z]
         self.C_matrices = nn.Parameter(cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z))

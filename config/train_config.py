@@ -56,7 +56,7 @@ class TrainConfig:
     def get_lambda_pred(self, epoch: int) -> float:
         """Prediction loss warmup."""
         if epoch < self.pred_warmup_epochs:
-            return self.pred_warmup_epochs * (epoch / self.pred_warmup_epochs)
+            return self.lambda_pred * (epoch / self.pred_warmup_epochs)
         return self.lambda_pred
     
     def get_lambda_free(self, epoch: int) -> float:

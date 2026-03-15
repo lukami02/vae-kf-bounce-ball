@@ -19,27 +19,30 @@ class KalmanFilter(nn.Module):
         self.cfg = cfg
 
         # init state
-        self.z_0     = nn.Parameter(torch.zeros(cfg.dim_z))                   # [dim_z]
-        self.P_0_log_diag = nn.Parameter(torch.zeros(cfg.dim_z))              # [dim_z, dim_z]
+        self.z_0 = nn.Parameter(torch.zeros(cfg.dim_z))                   # [dim_z]
+        self.P_0 = torch.eye(cfg.dim_z)                                   # [dim_z, dim_z]
 
         # init output
-        self.a_0 = nn.Parameter(torch.zeros(cfg.dim_a))                       # [dim_a]
+        self.a_0 = nn.Parameter(torch.zeros(cfg.dim_a))                   # [dim_a]
 
         # Noise covariances
-        self.log_Q_diag = nn.Parameter(torch.full((cfg.dim_z,), math.log(cfg.Q_std)))
+        mat_Q = cfg.Q_std * torch.eye(cfg.dim_z)
+        self._mat_Q = nn.Parameter(torch.linalg.cholesky((mat_Q + mat_Q.T) / 2))
+        mat_R = cfg.R_std * torch.eye(cfg.dim_a)
+        self._mat_R = nn.Parameter(torch.linalg.cholesky((mat_R + mat_R.T) / 2))
 
     @property
     def Q(self):
-        return torch.diag(torch.exp(self.log_Q_diag))                         # [dim_z, dim_z]
-
+        return self._mat_Q @ self._mat_Q.T + torch.eye(self.cfg.dim_z) * self.cfg.QR_reg # [dim_z, dim_z]                   
+    
     @property
-    def P_0(self):
-        return torch.diag(torch.exp(self.P_0_log_diag))
+    def R(self):
+        return self._mat_R @ self._mat_R.T + torch.eye(self.cfg.dim_a) * self.cfg.QR_reg # [dim_a, dim_a]                   
 
     def forward(self, a_seq, a_var, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None):
         """
         a_seq:       [B, T, dim_a]      — encoder means
-        a_var:       [B, T, dim_a]      — encoder variances -> R_k
+        a_var:       [B, T, dim_a]      — encoder variances
         alpha_net:   AlphaNetwork       
         h_obs:       [B, dim_obstacle]  — obstacle context
         A_matrices:  [K, dim_z, dim_z]  — A matrices stack
@@ -85,7 +88,6 @@ class KalmanFilter(nn.Module):
 
         for k in range(T):
             a_k    = a_seq[:, k, :]                                           # [B, dim_a]
-            R_k    = torch.diag_embed(a_var[:, k, :])                         # [B, dim_a, dim_a]
             mask_k = mask[:, k].unsqueeze(-1)                                 # [B, 1]
             u_k    = u_seq[:, k, :] if u_seq is not None else None
 
@@ -98,7 +100,7 @@ class KalmanFilter(nn.Module):
             a_k_hat = torch.bmm(C_k, z.unsqueeze(-1)).squeeze(-1)             # [B, dim_a]
             r_k     = a_k - a_k_hat                                           # [B, dim_a] 
 
-            S_k = torch.bmm(C_k, torch.bmm(P, C_k.transpose(1, 2))) + R_k     # [B, dim_a, dim_a]
+            S_k = torch.bmm(C_k, torch.bmm(P, C_k.transpose(1, 2))) + self.R  # [B, dim_a, dim_a]
             K_k = torch.linalg.solve(
                       S_k.transpose(1, 2),
                       torch.bmm(C_k, P.transpose(1, 2))
@@ -112,7 +114,7 @@ class KalmanFilter(nn.Module):
             # Joseph form 
             IKC    = I - torch.bmm(K_k, C_k)                                  # [B, dim_z, dim_z]
             P_filt = torch.bmm(IKC, torch.bmm(P, IKC.transpose(1, 2))) \
-                   + torch.bmm(K_k, torch.bmm(R_k, K_k.transpose(1, 2)))      # [B, dim_z, dim_z]
+                   + torch.bmm(K_k, torch.bmm(self.R, K_k.transpose(1, 2)))      # [B, dim_z, dim_z]
 
             # Filtered output
             a_filt_k = torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)       # [B, dim_a]
@@ -155,4 +157,4 @@ class KalmanFilter(nn.Module):
         a_pred    = torch.stack(a_pred_list, dim=1)   # [B, T, dim_a]
         alpha_seq = torch.stack(alpha_list,  dim=1)   # [B, T, K]
 
-        return z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq
+        return z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq, self.R, self.Q

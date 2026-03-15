@@ -92,7 +92,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
 
-        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -103,8 +103,11 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             z_pred     = z_pred,
             P_pred     = P_pred,
             a_filt     = a_filt,
+            z_filt     = z_filt,
             alpha_seq  = alpha_seq,
             C_matrices = getattr(model, 'C_matrices', None),
+            R          = R,
+            Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
@@ -144,7 +147,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
 
-        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
         _, terms = compute_loss(
             ball_seq   = ball_seq,
             x_hat_filt = x_hat_filt,
@@ -154,8 +157,11 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             z_pred     = z_pred,
             P_pred     = P_pred,
             a_filt     = a_filt,
+            z_filt     = z_filt,
             alpha_seq  = alpha_seq,
             C_matrices = getattr(model, 'C_matrices', None),
+            R          = R,
+            Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
@@ -205,12 +211,12 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
         if epoch >= tcfg.free_running_warmup:
             mask = mask_val.clone()
             rand_mask = torch.rand(sim_cfg.T, device=device) < tcfg.p_mask
-            rand_mask[:0.2*sim_cfg.T] = False
+            rand_mask[:int(0.2*sim_cfg.T)] = False
             mask[rand_mask] = 0.0
         else:
             mask = torch.ones(sim_cfg.T, device=device)
             rand_mask = torch.rand(sim_cfg.T, device=device) < tcfg.p_mask
-            rand_mask[:0.2*sim_cfg.T] = False
+            rand_mask[:int(0.2*sim_cfg.T)] = False
             mask[rand_mask] = 0.0
 
         train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)

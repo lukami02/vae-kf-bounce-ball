@@ -16,7 +16,7 @@ def kl_divergence_gaussian(mu_q, var_q, mu_p, var_p):
     return kl.sum(dim=-1)   # [B*T]
 
 
-def innovation_loss(r_k, S_k):
+def innovation_loss(r_k, R):
     """
     Negative log likelihood of innovation.
     L = r_k^T S_k^{-1} r_k + log|S_k|
@@ -26,21 +26,43 @@ def innovation_loss(r_k, S_k):
     """
     B, T, dim_a = r_k.shape
 
-    r = r_k.view(B * T, dim_a, 1)                                   # [B*T, dim_a, 1]
-    S = S_k.view(B * T, dim_a, dim_a)                               # [B*T, dim_a, dim_a]
+    r = r_k.view(B * T, dim_a, 1)         
 
-    # r^T S^{-1} r
-    S_inv = torch.linalg.inv(S)                                    # [B*T, dim_a, dim_a]
-    mahal = torch.bmm(r.transpose(1, 2), torch.bmm(S_inv, r))      # [B*T, 1, 1]
-    mahal = mahal.squeeze(-1).squeeze(-1)                          # [B*T]
+    R_inv = torch.linalg.inv(R)        
+    R_inv = R_inv.unsqueeze(0)                                    
+
+    mahal = torch.bmm(r.transpose(1,2), torch.bmm(R_inv.expand(r.shape[0],-1,-1), r))
+    mahal = mahal.squeeze()
 
     # log|S|
-    log_det = torch.linalg.slogdet(S)[1]                           # [B*T]
+    log_det = torch.linalg.slogdet(R)[1]    
 
     return (mahal + log_det).mean()
 
+def transition_loss(z_seq, z_pred, Q):
+    """
+    Negative log-likelihood of Kalman state transitions.
 
-def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred, a_filt, alpha_seq, C_matrices,
+    z_seq : [B, T, dim_z]
+    z_pred : [B, T, dim_z, dim_z]
+    Q     : [dim_z, dim_z]
+    """
+    B, T, dim_z = z_seq.shape
+
+    r = z_seq - z_pred                        
+    r = r.reshape(-1, dim_z, 1)                  
+
+    Q_inv = torch.linalg.inv(Q)
+    Q_inv = Q_inv.unsqueeze(0)
+
+    mahal = torch.bmm(r.transpose(1,2), torch.bmm(Q_inv.expand(r.shape[0],-1,-1), r))
+    mahal = mahal.squeeze()
+
+    log_det = torch.linalg.slogdet(Q)[1]
+
+    return (mahal + log_det).mean()
+
+def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred, a_filt, z_filt, alpha_seq, C_matrices, R, Q, 
                 cfg: VAEConfig, tcfg: TrainConfig, epoch: int, mask=None, train=True):
     """
     ball_seq,       # [B, T, H, W]     — ground truth
@@ -79,7 +101,7 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
         P_flat   = P_pred.view(B * T, cfg.dim_z, cfg.dim_z)                    # [B*T, dim_z, dim_z]
         CP       = torch.bmm(C_flat, P_flat)                                   # [B*T, dim_a, dim_z]
         CPCt     = torch.bmm(CP, C_flat.transpose(1, 2))                       # [B*T, dim_a, dim_a]
-        var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + a_var + 1e-8       # [B*T, dim_a]
+        var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + R + 1e-8           # [B*T, dim_a]
 
         if mask is not None:
             obs_mask_bt = mask.contiguous().reshape(B * T)
@@ -97,15 +119,17 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
         mu_p_seq = mu_p.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
         r_k = a_seq_bt - mu_p_seq                                               # [B, T, dim_a]
 
-        # S_k = CPCt + R_k
-        R_k  = torch.diag_embed(a_var.view(B, T, cfg.dim_a))                    # [B, T, dim_a, dim_a]
-        S_k  = CPCt.view(B, T, cfg.dim_a, cfg.dim_a) + R_k                      # [B, T, dim_a, dim_a]
-    
         if mask is not None:
             obs_mask = mask.unsqueeze(-1)                                       # [B, T, 1]
             r_k = r_k * obs_mask                                                # [B, T, dim_a]
 
-        L_innov = innovation_loss(r_k, S_k)
+        L_innov = innovation_loss(r_k, R)
+    
+        # Transition
+        if mask is None:
+            L_trans = transition_loss(z_filt[1:], z_pred[:-1], Q);
+        else:
+            L_trans = transition_loss(z_filt[1:]*mask, z_pred[:-1]*mask, Q);
     else:
         L_kl    = torch.tensor(0.0)
         L_innov = torch.tensor(0.0)
@@ -114,7 +138,7 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     lam_kl   = tcfg.get_lambda_kl(epoch)
     lam_pred = tcfg.get_lambda_pred(epoch)
 
-    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * L_innov)
+    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * (L_innov+L_trans)
 
     terms = {
         "loss": loss.item(),

@@ -14,10 +14,12 @@ class VAEConfig:
     gru_layers: int = 2
 
     # standard deviations for initialization 
-    B_std: float = 0.01                    # standard deviation for B matrices
-    C_std: float = 0.01                    # standard deviation for C matrices
-    Q_std: float = 0.025                   # standard deviation for process noise covariance Q
-    R_std: float = 0.01                    # standard deviation for observation noise covariance R
+    A_std: float = 0.1                     # standard deviation for A matrices
+    B_std: float = 0.1                     # standard deviation for B matrices
+    C_std: float = 0.1                     # standard deviation for C matrices
+    Q_std: float = 1                       # standard deviation for process noise covariance Q
+    R_std: float = 1                       # standard deviation for observation noise covariance R
+    QR_reg: float = 1e-3                   # diagonal regularization added to Q and R for numerical stability
 
     # encoder architecture
     encoder_ball_channels: list = field(default_factory=lambda: [8, 16, 32] )      # filters for moving ball CNN
