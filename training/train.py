@@ -265,7 +265,7 @@ if __name__ == "__main__":
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
     tcfg    = TrainConfig()
-
+    
     tcfg.checkpoint_dir = f"checkpoints/{args.model}"
 
     logger = setup_logger(log_dir=f"logs/{args.model}", log_file="train.log")

@@ -22,8 +22,8 @@ class TrainConfig:
     lr_gamma: float = 0.5       
 
     # Loss weights
-    lambda_recon: float = 0.15     # reconstruction loss
-    lambda_pred: float = 0.15      # prediction loss
+    lambda_recon: float = 0.5      # reconstruction loss
+    lambda_pred: float = 0.5       # prediction loss
     lambda_kl: float = 1           # KL divergence
     lambda_innov: float = 1        # innovation loss
     lambda_free: float = 1.0       # autoregressive loss

@@ -101,7 +101,8 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
         P_flat   = P_pred.view(B * T, cfg.dim_z, cfg.dim_z)                    # [B*T, dim_z, dim_z]
         CP       = torch.bmm(C_flat, P_flat)                                   # [B*T, dim_a, dim_z]
         CPCt     = torch.bmm(CP, C_flat.transpose(1, 2))                       # [B*T, dim_a, dim_a]
-        var_p    = torch.diagonal(CPCt, dim1=-2, dim2=-1) + R + 1e-8           # [B*T, dim_a]
+        var_p    = CPCt + R.unsqueeze(0).expand(CPCt.shape[0], -1, -1)
+        var_p    = torch.diagonal(var_p, dim1=-2, dim2=-1) + 1e-8          # [B*T, dim_a]
 
         if mask is not None:
             obs_mask_bt = mask.contiguous().reshape(B * T)
@@ -127,9 +128,11 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     
         # Transition
         if mask is None:
-            L_trans = transition_loss(z_filt[1:], z_pred[:-1], Q);
+            L_trans = transition_loss(z_filt[1:], z_pred[:-1], Q)
         else:
-            L_trans = transition_loss(z_filt[1:]*mask, z_pred[:-1]*mask, Q);
+            z_f = z_filt[:, 1:, :] * mask[:, 1:].unsqueeze(-1)
+            z_p = z_pred[:, :-1, :] * mask[:, 1:].unsqueeze(-1)
+            L_trans = transition_loss(z_f, z_p, Q)
     else:
         L_kl    = torch.tensor(0.0)
         L_innov = torch.tensor(0.0)
@@ -138,7 +141,7 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     lam_kl   = tcfg.get_lambda_kl(epoch)
     lam_pred = tcfg.get_lambda_pred(epoch)
 
-    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov * (L_innov+L_trans)
+    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov *(L_innov+L_trans))
 
     terms = {
         "loss": loss.item(),

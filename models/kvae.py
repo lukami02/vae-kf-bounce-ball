@@ -20,11 +20,16 @@ class KVAE(BaseVAE):
 
         # State transition matrices [K, dim_z, dim_z]
         self.A_matrices = nn.Parameter(
-            (1.0 - cfg.A_std) * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_z) + cfg.A_std * torch.eye(cfg.dim_z))
+            cfg.A_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_z)
+            + (1.0 - cfg.A_std) * torch.eye(cfg.dim_z).unsqueeze(0)
+        )
 
         # Observation matrices [K, dim_a, dim_z]
-        self.C_matrices = nn.Parameter(cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z))
-
+        self.C_matrices = nn.Parameter(
+            cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z)
+            + (1.0 - cfg.C_std) * torch.eye(cfg.dim_a, cfg.dim_z).unsqueeze(0)
+        
+        )
         # Control matrices [K, dim_z, dim_u]
         if cfg.dim_u > 0:
             self.B_matrices = nn.Parameter(cfg.B_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_u))
@@ -41,7 +46,7 @@ class KVAE(BaseVAE):
         a_var_seq = a_var.view(B, T, self.cfg.dim_a)
 
         # Kalman filter
-        z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq = self.kalman(
+        z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq, R, Q = self.kalman(
             a_seq       = a_seq,
             a_var       = a_var_seq,
             alpha_net   = self.alpha_net,
@@ -61,7 +66,7 @@ class KVAE(BaseVAE):
             x_hat_filt, x_hat_pred,
             a_seq, a_mu, a_var, a_filt,
             z_filt, P_filt, z_pred, P_pred,
-            alpha_seq,
+            alpha_seq, R, Q
         )
 
 

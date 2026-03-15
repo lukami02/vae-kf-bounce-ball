@@ -100,7 +100,7 @@ class KalmanFilter(nn.Module):
             a_k_hat = torch.bmm(C_k, z.unsqueeze(-1)).squeeze(-1)             # [B, dim_a]
             r_k     = a_k - a_k_hat                                           # [B, dim_a] 
 
-            S_k = torch.bmm(C_k, torch.bmm(P, C_k.transpose(1, 2))) + self.R  # [B, dim_a, dim_a]
+            S_k = torch.bmm(C_k, torch.bmm(P, C_k.transpose(1, 2))) + self.R.unsqueeze(0).expand(B, -1, -1) 
             K_k = torch.linalg.solve(
                       S_k.transpose(1, 2),
                       torch.bmm(C_k, P.transpose(1, 2))
@@ -114,7 +114,7 @@ class KalmanFilter(nn.Module):
             # Joseph form 
             IKC    = I - torch.bmm(K_k, C_k)                                  # [B, dim_z, dim_z]
             P_filt = torch.bmm(IKC, torch.bmm(P, IKC.transpose(1, 2))) \
-                   + torch.bmm(K_k, torch.bmm(self.R, K_k.transpose(1, 2)))      # [B, dim_z, dim_z]
+                   + torch.bmm(K_k, torch.bmm(self.R.unsqueeze(0).expand(B, -1, -1), K_k.transpose(1, 2)))  
 
             # Filtered output
             a_filt_k = torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)       # [B, dim_a]
