@@ -113,24 +113,27 @@ class BouncingBallSim:
 
         img = np.zeros((self.H,self.W), dtype=np.float32)
 
-        r = int(3*self.ball_sigma)
+        if self.cfg.ball_sigma:
+            r = int(3*self.ball_sigma)
 
-        x_min = max(0, int(x0-r))
-        x_max = min(self.W, int(x0+r)+1)
+            x_min = max(0, int(x0-r))
+            x_max = min(self.W, int(x0+r)+1)
 
-        y_min = max(0, int(y0-r))
-        y_max = min(self.H, int(y0+r)+1)
+            y_min = max(0, int(y0-r))
+            y_max = min(self.H, int(y0+r)+1)
 
-        x = np.arange(x_min,x_max)
-        y = np.arange(y_min,y_max)
+            x = np.arange(x_min,x_max)
+            y = np.arange(y_min,y_max)
 
-        xx,yy = np.meshgrid(x,y)
+            xx,yy = np.meshgrid(x,y)
 
-        g = np.exp(-((xx-x0)**2 + (yy-y0)**2) / (2*self.ball_sigma**2))
-        g /= g.max()
+            g = np.exp(-((xx-x0)**2 + (yy-y0)**2) / (2*self.ball_sigma**2))
+            g /= g.max()
 
-        img[y_min:y_max,x_min:x_max] = g
-
+            img[y_min:y_max,x_min:x_max] = g
+        else:
+            r = 2*self.r
+            cv2.circle(img, center=(int(x0), int(y0)), radius=int(r), color=1.0, thickness=-1)
         return img
     
     def spawn_ball(self):

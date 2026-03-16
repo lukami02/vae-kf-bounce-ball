@@ -14,7 +14,9 @@ class SimulationConfig:
     # ball
     ball_scale: float = 0.03               # ball radius as proportion of size
     ball_sigma: float = 0.03               # radius of Gaussian blob in pixels
+    ball_radius: float = 0.065
     speed_range: tuple[float, float] = (0.03, 0.08)
+    ball_gaussian: bool = False
     
 
     # obstacles 
