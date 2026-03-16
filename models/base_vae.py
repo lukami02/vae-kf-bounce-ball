@@ -25,9 +25,9 @@ class BaseVAE(nn.Module):
         """
         Encode ball sequence and obstacle image.
         """
-        a_seq, a_mu, a_var = self.ball_encoder(ball_seq, obstacle_img.unsqueeze(1))
+        a_dist = self.ball_encoder(ball_seq, obstacle_img.unsqueeze(1))
         h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))  # [B, dim_obstacle]
-        return a_seq, a_mu, a_var, h_obs
+        return a_dist, h_obs
 
     def decode(self, a_seq):
         """

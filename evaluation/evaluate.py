@@ -67,18 +67,18 @@ def predict_multistep(model, ball_seq, obstacle_img, n_steps, device):
     mask = torch.ones(B, T, device=device)
     mask[:, T - n_steps:] = 0.0
 
-    (x_hat_filt, x_hat_pred,
-     a_seq, a_mu, a_var, a_filt,
+    (x_dist_filt, x_dist_pred,
+     a_dist, a_seq, a_filt, a_pred,
      z_filt, P_filt, z_pred, P_pred,
-    alpha_seq) = model(ball_seq, obstacle_img, mask=mask)
+    alpha_seq, R, Q) = model(ball_seq, obstacle_img, mask=mask)
 
     return {
-        "a_mu":        to_numpy(a_mu.view(T, -1)),
+        "a_mu":        to_numpy(a_dist.loc[0]),
         "a_filt":      to_numpy(a_filt[0]),
         "a_pred_free": to_numpy(a_filt[0, T - n_steps:]),
-        "x_hat_filt":  to_numpy(x_hat_filt[0]),
-        "x_hat_pred":  to_numpy(x_hat_pred[0]),
-        "alpha_seq": to_numpy(alpha_seq[0]) if alpha_seq is not None else None,
+        "x_hat_filt":  to_numpy(x_dist_filt.mean[0]),
+        "x_hat_pred":  to_numpy(x_dist_pred.mean[0]) if x_dist_pred is not None else None,
+        "alpha_seq":   to_numpy(alpha_seq[0]) if alpha_seq is not None else None,
         "ball_seq":    to_numpy(ball_seq[0]),
     }
 
@@ -109,10 +109,12 @@ def compute_mse_per_step(model, loader, max_steps, device):
             mask = torch.ones(B, T, device=device)
             mask[:, T - n:] = 0.0
 
-            (x_hat_filt, _, _, _, _,
-             _, _, _, _, _, _) = model(ball_seq, obstacle_img, mask=mask)
+            (x_dist_filt, x_dist_pred,
+            a_dist, a_seq, a_filt, a_pred,
+            z_filt, P_filt, z_pred, P_pred,
+            alpha_seq, R, Q) = model(ball_seq, obstacle_img, mask=mask)
 
-            mse = ((x_hat_filt[:, T - n:] - ball_seq[:, T - n:]) ** 2).mean().item()
+            mse = ((x_dist_filt.mean[:, T - n:] - ball_seq[:, T - n:]) ** 2).mean().item()
             mse_per_step[n - 1] += mse * B
             counts[n - 1]       += B
 
@@ -138,16 +140,16 @@ def compute_metrics(model, loader, device):
         obstacle_img = obstacle_img.to(device)
         B, T, H, W   = ball_seq.shape
 
-        (x_hat_filt, x_hat_pred,
-         a_seq, a_mu, a_var, a_filt,
-         z_filt, P_filt, z_pred, P_pred,
-          alpha_seq) = model(ball_seq, obstacle_img)
+        (x_dist_filt, x_dist_pred,
+        a_dist, a_seq, a_filt, a_pred,
+        z_filt, P_filt, z_pred, P_pred,
+        alpha_seq, R, Q) = model(ball_seq, obstacle_img)
 
         # Reconstruction MSE
-        recon_mse = ((x_hat_filt - ball_seq) ** 2).mean().item()
+        recon_mse = ((x_dist_filt.mean - ball_seq) ** 2).mean().item()
 
         # Prediction MSE (1 step)
-        pred_mse = ((x_hat_pred[:, :-1] - ball_seq[:, 1:]) ** 2).mean().item()
+        pred_mse  = ((x_dist_pred.mean[:, :-1] - ball_seq[:, 1:]) ** 2).mean().item() if x_dist_pred is not None else 0.0
 
         # Latent smoothness
         smoothness = ((a_filt[:, 1:] - a_filt[:, :-1]) ** 2).mean().item()

@@ -30,37 +30,41 @@ class GRUVAE(BaseVAE):
         """
         B, T, H, W = ball_seq.shape
 
-        a_seq, a_mu, a_var, h_obs = self.encode(ball_seq, obstacle_img)
+        a_dist, h_obs = self.encode(ball_seq, obstacle_img)
+
+        if self.training:
+            a_seq = a_dist.rsample()  
+        else:
+            a_seq = a_dist.mean
 
         if mask is None:
             mask = torch.ones(B, T, device=ball_seq.device)
 
         a_filt_list = []
         a_pred_list = []
-        h_state = None              # GRU hidden state
-        a_prev = a_seq[:, 0, :]     # [B, dim_a]
+        h_state = None
+        a_pred_k = torch.zeros(B, self.cfg.dim_a, device=ball_seq.device)
 
         for k in range(T):
             mask_k = mask[:, k].unsqueeze(-1)                              # [B, 1]
+            a_prev = mask_k * a_seq[:, k, :] + (1 - mask_k) * a_pred_k
+            a_filt_list.append(a_prev)
 
             gru_input = torch.cat([a_prev, h_obs], dim=-1).unsqueeze(1)    # [B, 1, dim_a+dim_obs]
             gru_out, h_state = self.gru(gru_input, h_state)                # [B, 1, hidden]
             a_pred_k = self.fc_pred(gru_out.squeeze(1))                    # [B, dim_a]
 
-            a_filt_k = mask_k * a_seq[:, k, :] + (1 - mask_k) * a_pred_k   # [B, dim_a]
-
-            a_prev = a_filt_k
-
-            a_filt_list.append(a_filt_k)
-            a_pred_list.append(a_pred_k)
+            a_pred_list.append(a_pred_k)                                   
 
         a_filt = torch.stack(a_filt_list, dim=1)    # [B, T, dim_a]
         a_pred = torch.stack(a_pred_list, dim=1)    # [B, T, dim_a]
 
-        x_hat_filt = self.decode(a_filt)
-        x_hat_pred = self.decode(a_pred)
+        x_dist_filt = self.decode(a_filt)
+        x_dist_pred = self.decode(a_pred)
 
-        return (x_hat_filt, x_hat_pred, 
-                a_seq, a_mu, a_var, a_filt,
+        return (x_dist_filt, x_dist_pred, 
+                a_dist, a_seq, a_filt, a_pred,
                 None, None, None, None, 
-                None)
+                None, None, None)
+
+        

@@ -91,13 +91,14 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
     
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
             a_dist     = a_dist,
             a_seq      = a_seq,
+            a_pred     = a_pred,
             z_pred     = z_pred,
             P_pred     = P_pred,
             z_filt     = z_filt,
@@ -108,6 +109,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
+            epoch      = epoch
         )
 
         optimizer.zero_grad()
@@ -143,12 +145,13 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
 
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
         _, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
             a_dist     = a_dist,
             a_seq      = a_seq,
+            a_pred     = a_pred,
             z_pred     = z_pred,
             P_pred     = P_pred,
             z_filt     = z_filt,
@@ -159,6 +162,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
+            epoch      = epoch
         )
 
         for k, v in terms.items():

@@ -17,37 +17,40 @@ class CVVAE(BaseVAE):
     def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None):
         B, T, H, W = ball_seq.shape
 
-        a_seq, a_mu, a_var, h_obs = self.encode(ball_seq, obstacle_img)   # [B, T, dim_a]
+        a_dist, h_obs = self.encode(ball_seq, obstacle_img)   # [B, T, dim_a]
+
+        if self.training:
+            a_seq = a_dist.rsample()  
+        else:
+            a_seq = a_dist.mean
 
         if mask is None:
             mask = torch.ones(B, T, device=ball_seq.device)
 
         a_filt_list = []
         a_pred_list = []
-        a_prev      = a_seq[:, 0, :]                                      # [B, dim_a]
-        velocity    = torch.zeros_like(a_prev)                            # [B, dim_a]
+        a_pred_k = torch.zeros(B, self.cfg.dim_a, device=ball_seq.device)  # placeholder
+        velocity = torch.zeros(B, self.cfg.dim_a, device=ball_seq.device)
+        a_prev   = torch.zeros(B, self.cfg.dim_a, device=ball_seq.device)
 
         for k in range(T):
-            mask_k = mask[:, k].unsqueeze(-1)                             # [B, 1]
-
-            a_pred_k = a_prev + velocity                                  # [B, dim_a]
-
-            a_filt_k = mask_k * a_seq[:, k, :] + (1 - mask_k) * a_pred_k  # [B, dim_a]
+            mask_k   = mask[:, k].unsqueeze(-1)
+            a_filt_k = mask_k * a_seq[:, k, :] + (1 - mask_k) * a_pred_k
+            a_filt_list.append(a_filt_k)
 
             velocity = mask_k * (a_filt_k - a_prev) + (1 - mask_k) * velocity
+            a_prev   = a_filt_k
 
-            a_prev = a_filt_k
-
-            a_filt_list.append(a_filt_k)
+            a_pred_k = a_prev + velocity        
             a_pred_list.append(a_pred_k)
 
         a_filt = torch.stack(a_filt_list, dim=1)                          # [B, T, dim_a]
         a_pred = torch.stack(a_pred_list, dim=1)                          # [B, T, dim_a]
 
-        x_hat_filt = self.decode(a_filt)
-        x_hat_pred = self.decode(a_pred)
+        x_dist_filt = self.decode(a_filt)
+        x_dist_pred = self.decode(a_pred)
 
-        return (x_hat_filt, x_hat_pred, 
-                a_seq, a_mu, a_var, a_filt,
-                None, None, None, None, 
-                None)
+        return (x_dist_filt, x_dist_pred, 
+            a_dist, a_seq, a_filt, a_pred,
+            None, None, None, None, 
+            None, None, None)

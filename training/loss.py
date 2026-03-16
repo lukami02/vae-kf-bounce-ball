@@ -63,8 +63,8 @@ def transition_loss(z_seq, z_pred, Q):
 
     return (mahal + log_det).mean()
 
-def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, z_pred, P_pred, z_filt, P_filt, alpha_seq, C_matrices, R, Q, 
-                cfg: VAEConfig, tcfg: TrainConfig):
+def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, z_pred, P_pred, z_filt, P_filt, alpha_seq, C_matrices, R, Q, 
+                cfg: VAEConfig, tcfg: TrainConfig, epoch):
     """
     ball_seq,       # [B, T, H, W]     — ground truth
     x_dist_filt,     # [B, T, H, W]    — reconstruction distribution from a_filt
@@ -126,18 +126,31 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, z_pred, P_pred, z_filt, 
         posterior_log_prob = posterior_distrib.log_prob(z_pred.reshape(-1, dim_z))  
         L_posterior = posterior_log_prob.mean()
 
+        L_pred = torch.tensor(0.0)
+        L_kl = torch.tensor(0.0)
+
     else:
+        mu = a_dist.loc
+        log_var = a_dist.scale.log() * 2
+        L_kl = -0.5 * (1 + log_var - mu**2 - log_var.exp()).sum(-1)  # [B, T] 
+        L_kl = L_kl.mean()
+
+        # Prediction loss
+        pred_dist = D.Normal(a_pred[:, :-1, :], torch.ones_like(a_pred[:, :-1, :]))
+        L_pred = -pred_dist.log_prob(a_seq[:, 1:, :]).sum(-1).mean()      # [B, T-1]
+
         L_innov = torch.tensor(0.0)
         L_posterior = torch.tensor(0.0)
         L_prior = torch.tensor(0.0)
 
-    loss = (tcfg.lambda_recon * L_recon + tcfg.lambda_reg * L_regularization + tcfg.lambda_kalman * (L_innov + L_prior + L_posterior))
+    loss = (tcfg.lambda_recon * L_recon + tcfg.lambda_reg * L_regularization + tcfg.lambda_kalman * (L_innov + L_prior + L_posterior) + tcfg.get_lambda_kl(epoch) * L_kl)
 
     terms = {
         "loss": loss.item(),
         "recon": L_recon.item(),
         "reg": L_regularization.item(),
         "kalman": (L_innov + L_prior + L_posterior).item(),
+        "pred": L_pred.item()
     }
 
     return loss, terms

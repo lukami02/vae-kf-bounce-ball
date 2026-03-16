@@ -66,7 +66,7 @@ class KVAE(BaseVAE):
 
         return (
             x_dist_filt, x_dist_pred,
-            a_dist, a_seq, a_filt,
+            a_dist, a_seq, a_filt, a_pred,
             z_filt, P_filt, z_pred, P_pred,
             alpha_seq, R, Q
         )
