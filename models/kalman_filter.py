@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.distributions as D
 import math
 import sys
 sys.path.append("..")
@@ -20,7 +21,7 @@ class KalmanFilter(nn.Module):
 
         # init state
         self.z_0 = nn.Parameter(torch.zeros(cfg.dim_z))                   # [dim_z]
-        self.P_0 = torch.eye(cfg.dim_z)                                   # [dim_z, dim_z]
+        self.P_0 = nn.Parameter(torch.eye(cfg.dim_z), requires_grad=False)# [dim_z, dim_z]
 
         # init output
         self.a_0 = nn.Parameter(torch.zeros(cfg.dim_a))                   # [dim_a]
@@ -33,16 +34,17 @@ class KalmanFilter(nn.Module):
 
     @property
     def Q(self):
-        return self._mat_Q @ self._mat_Q.T + torch.eye(self.cfg.dim_z) * self.cfg.QR_reg # [dim_z, dim_z]                   
-    
+        device = self._mat_Q.device
+        return self._mat_Q @ self._mat_Q.T + torch.eye(self.cfg.dim_z, device=device) * self.cfg.QR_reg   # [dim_z, dim_z] 
+
     @property
     def R(self):
-        return self._mat_R @ self._mat_R.T + torch.eye(self.cfg.dim_a) * self.cfg.QR_reg # [dim_a, dim_a]                   
+        device = self._mat_R.device
+        return self._mat_R @ self._mat_R.T + torch.eye(self.cfg.dim_a, device=device) * self.cfg.QR_reg    # [dim_a, dim_a]         
 
-    def forward(self, a_seq, a_var, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None):
+    def forward(self, a_seq, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None):
         """
-        a_seq:       [B, T, dim_a]      — encoder means
-        a_var:       [B, T, dim_a]      — encoder variances
+        a_seq:       [B, T, dim_a]      — encoder sequence
         alpha_net:   AlphaNetwork       
         h_obs:       [B, dim_obstacle]  — obstacle context
         A_matrices:  [K, dim_z, dim_z]  — A matrices stack
@@ -98,7 +100,7 @@ class KalmanFilter(nn.Module):
 
             # Update 
             a_k_hat = torch.bmm(C_k, z.unsqueeze(-1)).squeeze(-1)             # [B, dim_a]
-            r_k     = a_k - a_k_hat                                           # [B, dim_a] 
+            r_k = a_k - a_k_hat                                               # [B, dim_a] 
 
             S_k = torch.bmm(C_k, torch.bmm(P, C_k.transpose(1, 2))) + self.R.unsqueeze(0).expand(B, -1, -1) 
             K_k = torch.linalg.solve(
@@ -114,13 +116,19 @@ class KalmanFilter(nn.Module):
             # Joseph form 
             IKC    = I - torch.bmm(K_k, C_k)                                  # [B, dim_z, dim_z]
             P_filt = torch.bmm(IKC, torch.bmm(P, IKC.transpose(1, 2))) \
-                   + torch.bmm(K_k, torch.bmm(self.R.unsqueeze(0).expand(B, -1, -1), K_k.transpose(1, 2)))  
+                   + torch.bmm(K_k, torch.bmm(self.R.unsqueeze(0).expand(B, -1, -1), K_k.transpose(1, 2))) 
+            P_filt = (P_filt + P_filt.transpose(1, 2)) / 2.0
 
             # Filtered output
-            a_filt_k = torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)       # [B, dim_a]
+            if self.training:
+                a_filt_k = D.MultivariateNormal(
+                    torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1), self.R
+                ).rsample()
+            else:
+                a_filt_k = torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)
 
             # Update alpha
-            a_for_alpha = mask_k * a_k + (1 - mask_k) * a_k_hat               # [B, dim_a]
+            a_for_alpha = mask_k * a_k + (1 - mask_k) * a_filt_k              # [B, dim_a]
             alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, gru_state)
             alpha_list.append(alpha_k)
 
@@ -129,15 +137,26 @@ class KalmanFilter(nn.Module):
             C_k = (w * C_matrices.unsqueeze(0)).sum(dim=1)                    # [B, dim_a, dim_z]
 
             # State prediction
-            z_pred = torch.bmm(A_k, z_filt.unsqueeze(-1)).squeeze(-1)            # [B, dim_z]
+            if self.training:
+                z_pred = D.MultivariateNormal(torch.bmm(A_k, z_filt.unsqueeze(-1)).squeeze(-1), Q).rsample()
+            else:
+                z_pred = torch.bmm(A_k, z_filt.unsqueeze(-1)).squeeze(-1)
+                
             if self.cfg.dim_u > 0 and B_matrices is not None and u_k is not None:
                 B_k    = (w * B_matrices.unsqueeze(0)).sum(dim=1)                # [B, dim_z, dim_u]
                 z_pred = z_pred + torch.bmm(B_k, u_k.unsqueeze(-1)).squeeze(-1)
 
             P_pred = torch.bmm(A_k, torch.bmm(P_filt, A_k.transpose(1, 2))) + Q  # [B, dim_z, dim_z]
+            P_pred = (P_pred + P_pred.transpose(1, 2)) / 2.0
 
             # Observation prediction
             a_pred_k = torch.bmm(C_k, z_pred.unsqueeze(-1)).squeeze(-1)       # [B, dim_a]
+
+            if k < self.cfg.burn_in:
+                z_filt = z_filt.detach()
+                P_filt = P_filt.detach()
+                z_pred = z_pred.detach()
+                P_pred = P_pred.detach()
 
             z_filt_list.append(z_filt)
             P_filt_list.append(P_filt)

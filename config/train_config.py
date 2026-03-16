@@ -27,6 +27,8 @@ class TrainConfig:
     lambda_kl: float = 1           # KL divergence
     lambda_innov: float = 1        # innovation loss
     lambda_free: float = 1.0       # autoregressive loss
+    lambda_kalman: float = 1.0     # Kalman loss
+    lambda_reg: float = 0.3        # Regularization loss
 
     # KL annealing
     kl_annealing: bool = True

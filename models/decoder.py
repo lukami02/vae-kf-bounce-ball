@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.distributions as D
 import sys
 sys.path.append("..")
 from config.vae_config import VAEConfig
@@ -31,13 +32,12 @@ class BallDecoder(nn.Module):
             in_ch  = channels[i]
             out_ch = channels[i + 1] if i < len(channels) - 1 else 1
 
-            layers += [
-                nn.Conv2d(in_ch, out_ch * 4, kernel_size=3, padding=1),  # *4 for PixelShuffle
-                nn.PixelShuffle(2),                                        # out_ch x 2H x 2W
-                vae_cfg.dec_activation(),
-            ]
+            layers.append(nn.Conv2d(in_ch, out_ch * 4, kernel_size=3, padding=1))
+            layers.append(nn.PixelShuffle(2))
 
-        layers += [nn.Conv2d(1, 1, kernel_size=3, padding=1), nn.Sigmoid()]
+            if i < len(channels) - 1:
+                layers.append(vae_cfg.dec_activation())
+
         self.upsample = nn.Sequential(*layers)
 
     def forward(self, a_seq):
@@ -48,4 +48,5 @@ class BallDecoder(nn.Module):
         x = x.view(B * T, self.init_channels, self.init_size, self.init_size)   # [B*T, C, h, w]
         x = self.upsample(x)                                                    # [B*T, 1, H, W]
 
-        return x.view(B, T, self.sim_cfg.size[0], self.sim_cfg.size[1])         # [B, T, H, W]
+        x = x.view(B, T, self.sim_cfg.size[0], self.sim_cfg.size[1])            # [B, T, H, W]
+        return D.Bernoulli(logits=x)

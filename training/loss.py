@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import torch.distributions as D
 from config.train_config import TrainConfig
 from config.vae_config import VAEConfig
 
@@ -62,12 +63,12 @@ def transition_loss(z_seq, z_pred, Q):
 
     return (mahal + log_det).mean()
 
-def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred, a_filt, z_filt, alpha_seq, C_matrices, R, Q, 
-                cfg: VAEConfig, tcfg: TrainConfig, epoch: int, mask=None, train=True):
+def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, z_pred, P_pred, z_filt, P_filt, alpha_seq, C_matrices, R, Q, 
+                cfg: VAEConfig, tcfg: TrainConfig):
     """
     ball_seq,       # [B, T, H, W]     — ground truth
-    x_hat_filt,     # [B, T, H, W]     — reconstruction from a_filt
-    x_hat_pred,     # [B, T, H, W]     — reconstruction from a_pred
+    x_dist_filt,     # [B, T, H, W]    — reconstruction distribution from a_filt
+    x_dist_pred,     # [B, T, H, W]    — reconstruction distribution from a_pred
     a_mu,           # [B*T, dim_a]     — encoder mean
     a_var,          # [B*T, dim_a]     — encoder variance
     z_pred,         # [B, T, dim_z]    — Kalman predicted state
@@ -79,76 +80,64 @@ def compute_loss( ball_seq, x_hat_filt, x_hat_pred, a_mu, a_var, z_pred, P_pred,
     B, T, H, W = ball_seq.shape
 
     # Reconstruction loss  —  E_q[log p(x | a_filt)]
-    L_recon = F.mse_loss(x_hat_filt, ball_seq)
+    L_recon = -x_dist_filt.log_prob(ball_seq).sum(dim=(2,3)).mean()
 
-    # Prediction loss  —  E_q[log p(x_{k+1} | a_pred_k)]
-    L_pred = F.mse_loss(x_hat_pred[:, :-1], ball_seq[:, 1:])
+    # Regularization loss  —  E_q[q(a | x)]
+    L_regularization = a_dist.log_prob(a_seq).sum(-1).mean()
 
     if z_pred is not None and P_pred is not None: # KVAE
-        # KL divergence  —  KL(q(a|x) || p(a|z))
-        # p(a_k|z_k) = N(C_k @ z_pred_k, R_kalman)
+        # Inovation loss — E_q[p(a | z)]
+        w = alpha_seq[:, 1:].unsqueeze(-1).unsqueeze(-1)                # [B, T-1, K, 1, 1]
+        C_seq = (w * C_matrices.unsqueeze(0).unsqueeze(0)).sum(dim=2)    # [B, T-1, dim_a, dim_z]
 
-        # Kalman prior mean: mu_p = C_k @ z_pred_k
-        w = alpha_seq.unsqueeze(-1).unsqueeze(-1)                              # [B, T, K, 1, 1]
-        C_seq = (w * C_matrices.unsqueeze(0).unsqueeze(0)).sum(dim=2)          # [B, T, dim_a, dim_z]
-        mu_p  = torch.bmm(
-                    C_seq.view(B * T, cfg.dim_a, cfg.dim_z),
-                    z_pred.view(B * T, cfg.dim_z, 1)
-                ).squeeze(-1)                                                  # [B*T, dim_a]
+        z_pred_trim = z_pred[:, :-1, :]                                  # [B, T-1, dim_z]
+        a_pred = torch.bmm(
+            C_seq.reshape(-1, cfg.dim_a, cfg.dim_z),                     # [B*(T-1), dim_a, dim_z]
+            z_pred_trim.reshape(-1, cfg.dim_z, 1)                        # [B*(T-1), dim_z, 1]
+        ).squeeze(-1)                                                    # [B*(T-1), dim_a]
+        a_target = a_seq[:, 1:, :].reshape(-1, cfg.dim_a)                # [B*(T-1), dim_a]
 
-        # Kalman prior variance: var_p = C_k @ P_pred_k @ C_k^T + a_va
-        C_flat   = C_seq.view(B * T, cfg.dim_a, cfg.dim_z)                     # [B*T, dim_a, dim_z]
-        P_flat   = P_pred.view(B * T, cfg.dim_z, cfg.dim_z)                    # [B*T, dim_z, dim_z]
-        CP       = torch.bmm(C_flat, P_flat)                                   # [B*T, dim_a, dim_z]
-        CPCt     = torch.bmm(CP, C_flat.transpose(1, 2))                       # [B*T, dim_a, dim_a]
-        var_p    = CPCt + R.unsqueeze(0).expand(CPCt.shape[0], -1, -1)
-        var_p    = torch.diagonal(var_p, dim1=-2, dim2=-1) + 1e-8          # [B*T, dim_a]
+        kalman_observation_distrib = D.MultivariateNormal(a_pred, R)
+        kalman_observation_log_likelihood = kalman_observation_distrib.log_prob(a_target)  # [B*(T-1)]  za ovaj loss da pomnozi
+        L_innov = -kalman_observation_log_likelihood.mean()                           
 
-        if mask is not None:
-            obs_mask_bt = mask.contiguous().reshape(B * T)
-            L_kl = (kl_divergence_gaussian(a_mu, a_var, mu_p, var_p) * obs_mask_bt).sum() \
-                / obs_mask_bt.sum().clamp(min=1)             
-        else:
-            L_kl = kl_divergence_gaussian(a_mu, a_var, mu_p, var_p).mean()
+        # Prior loss E_q[ln p(z_t | z_{t-1})]
 
-        # Innovation loss 
-        # r_k = a_k - C_k @ z_pred_k
-        # S_k = C_k @ P_pred @ C_k^T + R_k
+        # z_0 ~ N(0, I)
+        z0_prior = D.MultivariateNormal(
+            loc=torch.zeros(cfg.dim_z, device=z_pred.device, dtype=z_pred.dtype),
+            covariance_matrix=torch.eye(cfg.dim_z, device=z_pred.device, dtype=z_pred.dtype)
+        )
+        L_prior_z0 = -z0_prior.log_prob(z_pred[:, 0, :]).mean()  # [B]
 
-        # Innovation
-        a_seq_bt = a_mu.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
-        mu_p_seq = mu_p.view(B, T, cfg.dim_a)                                   # [B, T, dim_a]
-        r_k = a_seq_bt - mu_p_seq                                               # [B, T, dim_a]
+        # z_t ~ N(z_pred_{t-1}, Q)  for t=1..T-1
+        z_prior_trans = D.MultivariateNormal(
+            loc=z_pred[:, :-1, :].reshape(-1, cfg.dim_z),                        # [B*(T-1), dim_z]
+            covariance_matrix=Q.unsqueeze(0).expand(B * (T - 1), -1, -1)         # [B*(T-1), dim_z, dim_z]
+        )
+        L_prior_trans = -z_prior_trans.log_prob(z_pred[:, 1:, :].reshape(-1, cfg.dim_z)).mean()  # [B*(T-1)]
 
-        if mask is not None:
-            obs_mask = mask.unsqueeze(-1)                                       # [B, T, 1]
-            r_k = r_k * obs_mask                                                # [B, T, dim_a]
+        L_prior = L_prior_z0 + L_prior_trans
 
-        L_innov = innovation_loss(r_k, R)
-    
-        # Transition
-        if mask is None:
-            L_trans = transition_loss(z_filt[1:], z_pred[:-1], Q)
-        else:
-            z_f = z_filt[:, 1:, :] * mask[:, 1:].unsqueeze(-1)
-            z_p = z_pred[:, :-1, :] * mask[:, 1:].unsqueeze(-1)
-            L_trans = transition_loss(z_f, z_p, Q)
+        # Posterior loss E_q[p(z | a)]
+        B, T, dim_z = z_pred.shape
+        
+        posterior_distrib = D.MultivariateNormal(loc=z_filt.reshape(-1, dim_z), covariance_matrix=P_filt.reshape(-1, dim_z, dim_z))
+        posterior_log_prob = posterior_distrib.log_prob(z_pred.reshape(-1, dim_z))  
+        L_posterior = posterior_log_prob.mean()
+
     else:
-        L_kl    = torch.tensor(0.0)
         L_innov = torch.tensor(0.0)
+        L_posterior = torch.tensor(0.0)
+        L_prior = torch.tensor(0.0)
 
-    # Weighted sum
-    lam_kl   = tcfg.get_lambda_kl(epoch)
-    lam_pred = tcfg.get_lambda_pred(epoch)
-
-    loss = (tcfg.lambda_recon * L_recon + lam_pred * L_pred + lam_kl * L_kl + tcfg.lambda_innov *(L_innov+L_trans))
+    loss = (tcfg.lambda_recon * L_recon + tcfg.lambda_reg * L_regularization + tcfg.lambda_kalman * (L_innov + L_prior + L_posterior))
 
     terms = {
         "loss": loss.item(),
         "recon": L_recon.item(),
-        "pred": L_pred.item(),
-        "kl": L_kl.item(),
-        "innov": L_innov.item()
+        "reg": L_regularization.item(),
+        "kalman": (L_innov + L_prior + L_posterior).item(),
     }
 
     return loss, terms

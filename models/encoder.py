@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.distributions as D
+import torch.nn.functional as F
 import sys
 
 sys.path.append("..")
@@ -48,7 +50,7 @@ class BallEncoder(nn.Module):
 
     def forward(self, x, obs_img):
         """
-        x:       [B, T, H, W]
+        x: [B, T, H, W]
         obs_img: [B, 1, H, W]
         """
         B, T, H, W = x.shape
@@ -63,11 +65,11 @@ class BallEncoder(nn.Module):
         enc = enc.view(B * T, -1)
 
         a_mu = self.fc_mu(enc)
-        a_var = torch.sigmoid(self.fc_var(enc)) * 0.1
-        a = self.reparametrize(a_mu, a_var)
-        a_seq = a.view(B, T, self.cfg.dim_a)
-
-        return a_seq, a_mu, a_var
+        a_std = F.softplus(self.fc_var(enc)) + 1e-6
+        #a = self.reparametrize(a_mu, a_var)
+        a_mu = a_mu.view(B, T, self.cfg.dim_a)
+        a_std = a_std.view(B, T, self.cfg.dim_a)
+        return D.Normal(loc=a_mu, scale=a_std)
 
 class ObstacleEncoder(nn.Module):
     """

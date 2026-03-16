@@ -113,7 +113,7 @@ class BouncingBallSim:
 
         img = np.zeros((self.H,self.W), dtype=np.float32)
 
-        if self.cfg.ball_sigma:
+        if self.cfg.ball_gaussian:
             r = int(3*self.ball_sigma)
 
             x_min = max(0, int(x0-r))

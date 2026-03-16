@@ -40,15 +40,17 @@ class KVAE(BaseVAE):
         B, T, H, W = ball_seq.shape
 
         # Encode
-        a_seq, a_mu, a_var = self.ball_encoder(ball_seq, obstacle_img.unsqueeze(1)) # a_seq: [B, T, dim_a]
+        a_dist = self.ball_encoder(ball_seq, obstacle_img.unsqueeze(1)) # a_seq: [B, T, dim_a]
         h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))        # [B, dim_obstacle]
 
-        a_var_seq = a_var.view(B, T, self.cfg.dim_a)
+        if self.training:
+            a_seq = a_dist.rsample()  
+        else:
+            a_seq = a_dist.mean
 
         # Kalman filter
         z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq, R, Q = self.kalman(
             a_seq       = a_seq,
-            a_var       = a_var_seq,
             alpha_net   = self.alpha_net,
             h_obs       = h_obs,
             A_matrices  = self.A_matrices,
@@ -59,12 +61,12 @@ class KVAE(BaseVAE):
         )
 
         # Decode
-        x_hat_filt = self.decode(a_filt)   # [B, T, H, W]
-        x_hat_pred = self.decode(a_pred)   # [B, T, H, W]
+        x_dist_filt = self.decode(a_filt)   # [B, T, H, W]
+        x_dist_pred = self.decode(a_pred)   # [B, T, H, W]
 
         return (
-            x_hat_filt, x_hat_pred,
-            a_seq, a_mu, a_var, a_filt,
+            x_dist_filt, x_dist_pred,
+            a_dist, a_seq, a_filt,
             z_filt, P_filt, z_pred, P_pred,
             alpha_seq, R, Q
         )

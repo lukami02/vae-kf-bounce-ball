@@ -76,8 +76,7 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
 
 def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
     model.train()
-    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
-
+    total_terms = {"loss": 0, "recon": 0, "reg": 0, "kalman": 0}
     for batch in loader:
         if len(batch) == 2:
             ball_seq, obstacle_img = batch
@@ -91,27 +90,24 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
         if mask is not None:
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
-
-        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+    
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
-            x_hat_filt = x_hat_filt,
-            x_hat_pred = x_hat_pred,
-            a_mu       = a_mu,
-            a_var      = a_var,
+            x_dist_filt = x_dist_filt,
+            a_dist     = a_dist,
+            a_seq      = a_seq,
             z_pred     = z_pred,
             P_pred     = P_pred,
-            a_filt     = a_filt,
             z_filt     = z_filt,
+            P_filt     = P_filt,
             alpha_seq  = alpha_seq,
             C_matrices = getattr(model, 'C_matrices', None),
             R          = R,
             Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
-            epoch      = epoch,
-            mask       = current_mask
         )
 
         optimizer.zero_grad()
@@ -131,7 +127,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
 @torch.no_grad()
 def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
     model.eval()
-    total_terms = {"loss": 0, "recon": 0, "pred": 0, "kl": 0, "innov": 0}
+    total_terms = {"loss": 0, "recon": 0, "reg": 0, "kalman": 0}
 
     for batch in loader:
         if len(batch) == 2:
@@ -147,25 +143,22 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
 
-        (x_hat_filt, x_hat_pred, a_seq, a_mu, a_var, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
         _, terms = compute_loss(
             ball_seq   = ball_seq,
-            x_hat_filt = x_hat_filt,
-            x_hat_pred = x_hat_pred,
-            a_mu       = a_mu,
-            a_var      = a_var,
+            x_dist_filt = x_dist_filt,
+            a_dist     = a_dist,
+            a_seq      = a_seq,
             z_pred     = z_pred,
             P_pred     = P_pred,
-            a_filt     = a_filt,
             z_filt     = z_filt,
+            P_filt     = P_filt,
             alpha_seq  = alpha_seq,
             C_matrices = getattr(model, 'C_matrices', None),
             R          = R,
             Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
-            epoch      = epoch,
-            mask       = current_mask
         )
 
         for k, v in terms.items():
@@ -232,9 +225,8 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                 f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
                 f"loss={train_terms['loss']:.4f}  "
                 f"recon={train_terms['recon']:.4f}  "
-                f"pred={train_terms['pred']:.4f}  "
-                f"kl={train_terms['kl']:.4f}  "
-                f"innov={train_terms['innov']:.4f} | "
+                f"reg={train_terms['reg']:.4f}  "
+                f"kalman={train_terms['kalman']:.4f} | "
                 f"val_loss={val_terms['loss']:.4f}"
             )
 

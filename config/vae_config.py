@@ -8,6 +8,7 @@ class VAEConfig:
     dim_z: int = 4                         # dimension of latent state
     dim_u: int = 0                         # dimension of control input (set to 0 if not used)
     num_matrices: int = 3                  # number of different matrices to experiment with
+    burn_in: int = 3                       # number of first steps not to train
 
     # GRU dimension
     gru_hidden_dim: int = 16
