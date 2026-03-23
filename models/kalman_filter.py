@@ -129,7 +129,7 @@ class KalmanFilter(nn.Module):
 
             # Update alpha
             a_for_alpha = mask_k * a_k + (1 - mask_k) * a_filt_k              # [B, dim_a]
-            alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, gru_state)
+            alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, z_filt.detach(), gru_state)
             alpha_list.append(alpha_k)
 
             w   = alpha_k.unsqueeze(-1).unsqueeze(-1)
