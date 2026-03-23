@@ -86,19 +86,26 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
     device = ball_seq.device
 
     # log p(x | a) — reconstruction
-    L_recon = -x_dist_filt.log_prob(ball_seq).sum(dim=(2, 3)).mean()
+    logits = x_dist_filt.logits
+    pos_weight = torch.tensor(tcfg.pos_weight, device=device)
+    L_recon = F.binary_cross_entropy_with_logits(
+        logits,
+        ball_seq,
+        pos_weight=pos_weight,
+        reduction='none'
+    ).sum(dim=(2, 3)).mean()
 
     if z_pred is not None and P_filt is not None:  # KVAE
         # log p(a | z) — innovation
-        L_innov = D.MultivariateNormal(a_filt, R).log_prob(a_seq).mean()
+        L_innov = - D.MultivariateNormal(a_filt, R).log_prob(a_seq).mean()
 
         # log p(z | u) — state prior
-        L_prior_z0 = D.MultivariateNormal(
+        L_prior_z0 = - D.MultivariateNormal(
             torch.zeros(dim_z, device=device, dtype=z_filt.dtype),
             torch.eye(dim_z, device=device, dtype=z_filt.dtype)
         ).log_prob(z_filt[:, 0, :]).mean()
 
-        L_prior_trans = D.MultivariateNormal(
+        L_prior_trans = - D.MultivariateNormal(
             z_pred[:, :-1, :].reshape(-1, dim_z),
             Q.unsqueeze(0).expand(B * (T - 1), -1, -1)
         ).log_prob(z_filt[:, 1:, :].reshape(-1, dim_z)).mean()
@@ -109,13 +116,20 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
         L_entropy = a_dist.log_prob(a_seq).sum(-1).mean()
 
         # log p(z | a, u) — Kalman posterior 
-        L_posterior = D.MultivariateNormal(
+        P_filt_reg = P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
+        P_filt_reg = P_filt_reg + cfg.QR_reg * torch.eye(dim_z, device=device).unsqueeze(0)
+
+        L_posterior = - D.MultivariateNormal(
             z_filt[:, 1:, :].reshape(-1, dim_z),
-            P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
+            P_filt_reg
         ).log_prob(z_pred[:, :-1, :].reshape(-1, dim_z)).mean()
 
-        kalman_elbo = L_innov + L_prior - L_entropy - L_posterior
-        loss = tcfg.lambda_recon * L_recon - tcfg.lambda_kalman * kalman_elbo
+        loss = (tcfg.lambda_recon * L_recon +
+                tcfg.lambda_innov * L_innov +
+                tcfg.lambda_posterior * L_posterior +
+                tcfg.lambda_prior * L_prior -
+                tcfg.lambda_entropy * L_entropy
+        )
 
         terms = {
             "loss":      loss.item(),

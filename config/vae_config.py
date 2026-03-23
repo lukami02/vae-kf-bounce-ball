@@ -15,16 +15,16 @@ class VAEConfig:
     gru_layers: int = 2
 
     # standard deviations for initialization 
-    A_std: float = 0.1                     # standard deviation for A matrices
+    A_std: float = 0.1                    # standard deviation for A matrices
     B_std: float = 0.1                     # standard deviation for B matrices
     C_std: float = 0.1                     # standard deviation for C matrices
-    Q_std: float = 1                       # standard deviation for process noise covariance Q
-    R_std: float = 1                       # standard deviation for observation noise covariance R
+    Q_std: float = 0.1                     # standard deviation for process noise covariance Q
+    R_std: float = 0.1                     # standard deviation for observation noise covariance R
     QR_reg: float = 1e-3                   # diagonal regularization added to Q and R for numerical stability
 
     # encoder architecture
     encoder_ball_channels: list = field(default_factory=lambda: [8, 16, 32] )      # filters for moving ball CNN
-    encoder_obstacle_channels: list = field(default_factory=lambda: [16, 32, 32])  # filters for static obstacle CNN
+    encoder_obstacle_channels: list = field(default_factory=lambda: [8, 16, 32])  # filters for static obstacle CNN
     dim_obstacle: int = 16                          # latent size for obstacle features
     enc_activation: type = nn.ELU                   # activation class for encoder layers
 
@@ -33,5 +33,5 @@ class VAEConfig:
     dec_activation: type = nn.ELU                   # activation class for decoder layers
 
     # alpha network
-    alpha_units: int = 3                   # hidden units in alpha network
+    alpha_units: int = 32                  # hidden units in alpha network
     

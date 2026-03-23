@@ -21,9 +21,9 @@ class KVAE(BaseVAE):
         # State transition matrices [K, dim_z, dim_z]
         self.A_matrices = nn.Parameter(
             cfg.A_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_z)
-            + (1.0 - cfg.A_std) * torch.eye(cfg.dim_z).unsqueeze(0)
+            + (1.0 - cfg.A_std) * torch.eye(cfg.dim_z, cfg.dim_z).unsqueeze(0)
         )
-
+        
         # Observation matrices [K, dim_a, dim_z]
         self.C_matrices = nn.Parameter(
             cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z)

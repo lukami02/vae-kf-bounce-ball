@@ -8,11 +8,12 @@ class TrainConfig:
     # Training
     epochs: int = 50
     batch_size: int = 128
-    learning_rate: float = 1e-2
-    grad_clip: float = 2.5
+    learning_rate: float = 5e-3
+    grad_clip: float = 1.0
     seed: int = 42
     val_split:  float = 0.1    
     test_split: float = 0.01
+    pos_weight: float = 10.0      # binary cross entropy positive class weight
 
     # Optimizer
     optimizer: str   = "adamw"     
@@ -22,14 +23,17 @@ class TrainConfig:
     lr_gamma: float = 0.5       
 
     # Loss weights
-    lambda_recon: float = 0.3      # reconstruction loss
+    
+    lambda_recon: float = 0.5      # reconstruction loss
+    lambda_innov: float = 0.9      # innovation loss
+    lambda_posterior: float = 0.1  # posterior loss
+    lambda_prior: float = 0.9      # prior loss
+    lambda_entropy: float = 0.5    # Entropy loss
+
     lambda_pred: float = 0.3       # prediction loss
     lambda_kl: float = 1           # KL divergence
-    lambda_innov: float = 1        # innovation loss
-    lambda_free: float = 1.0       # autoregressive loss
-    lambda_kalman: float = 1.0     # Kalman loss
     lambda_reg: float = 0.3        # Regularization loss
-    lambda_entropy: float = 0.1    # Entropy loss
+
 
     # KL annealing
     kl_annealing: bool = True
