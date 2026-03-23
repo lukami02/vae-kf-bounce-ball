@@ -9,7 +9,7 @@ from config.simulation_config import SimulationConfig
 
 class BallDecoder(nn.Module):
     """
-    Decodes latent vector back to ball image using Pixel Shuffle upsampling.
+    Decodes latent vector back to ball image.
     """
     def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig):
         super().__init__()
@@ -32,8 +32,7 @@ class BallDecoder(nn.Module):
             in_ch  = channels[i]
             out_ch = channels[i + 1] if i < len(channels) - 1 else 1
 
-            layers.append(nn.Conv2d(in_ch, out_ch * 4, kernel_size=3, padding=1))
-            layers.append(nn.PixelShuffle(2))
+            layers.append(nn.ConvTranspose2d(in_ch, out_ch, kernel_size=4, stride=2, padding=1))
 
             if i < len(channels) - 1:
                 layers.append(vae_cfg.dec_activation())
