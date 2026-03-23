@@ -20,21 +20,57 @@ class KVAE(BaseVAE):
 
         # State transition matrices [K, dim_z, dim_z]
         self.A_matrices = nn.Parameter(
-            cfg.A_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_z)
-            + (1.0 - cfg.A_std) * torch.eye(cfg.dim_z, cfg.dim_z).unsqueeze(0)
+            self.init_A_matrices()
         )
         
         # Observation matrices [K, dim_a, dim_z]
         self.C_matrices = nn.Parameter(
-            cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z)
-            + (1.0 - cfg.C_std) * torch.eye(cfg.dim_a, cfg.dim_z).unsqueeze(0)
-        
+            self.init_C_matrices()
         )
         # Control matrices [K, dim_z, dim_u]
         if cfg.dim_u > 0:
             self.B_matrices = nn.Parameter(cfg.B_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_u))
         else:
             self.B_matrices = None
+
+    def init_A_matrices(self, dt=0.1):
+        K, dim_z = self.cfg.num_matrices, self.cfg.dim_z
+        A = torch.zeros(K, dim_z, dim_z)
+        
+        # Sve matrice krecu od identiteta
+        for k in range(K):
+            A[k] = torch.eye(dim_z)
+        
+        # Mode 0
+        half = dim_z // 2
+        for i in range(half):
+            A[0, i, i + half] = dt  # p_i += v_i * dt
+
+        # Mode 1
+        A[1] = A[0].clone()
+        quarter = max(1, half // 2)
+        for i in range(quarter):
+            A[1, i + half, i + half] = -0.9 
+
+        # Mode 2
+        if K > 2:
+            A[2] = A[0].clone()
+            for i in range(quarter, half):
+                A[2, i + half, i + half] = -0.9
+
+        for k in range(3, K):
+            A[k] = A[0].clone()
+            A[k] += self.cfg.A_std * torch.randn(dim_z, dim_z)
+
+        return A
+
+    def init_C_matrices(self):
+        C = torch.zeros(self.cfg.num_matrices, self.cfg.dim_a, self.cfg.dim_z)
+        for i in range(self.cfg.num_matrices):
+            for j in range(min(self.cfg.dim_a, self.cfg.dim_z)):
+                C[i, j, j] = 1.0
+        C += self.cfg.C_std * torch.randn_like(C)
+        return C
 
     def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None):
         B, T, H, W = ball_seq.shape
