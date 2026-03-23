@@ -15,7 +15,13 @@ class AlphaNetwork(nn.Module):
         self.input_dim = cfg.dim_a + cfg.dim_obstacle + cfg.dim_u 
 
         self.gru = nn.GRUCell(self.input_dim, cfg.alpha_units)
-        self.fc_alpha = nn.Linear(cfg.alpha_units, cfg.num_matrices)
+        self.fc_alpha = nn.Sequential(
+            nn.Linear(cfg.alpha_units, cfg.alpha_units // 2),
+            nn.Tanh(),
+            nn.Linear(cfg.alpha_units // 2, cfg.num_matrices)
+        )
+
+        self.log_temperature = nn.Parameter(torch.tensor(0.0))
 
     def forward(self, a_k, h_obs, state=None, u_k=None):
         if self.cfg.num_matrices == 1:
@@ -28,9 +34,14 @@ class AlphaNetwork(nn.Module):
         inputs = torch.cat(parts, dim=-1)                      # [B, input_dim]
 
         state  = self.gru(inputs, state)                       # [B, alpha_units]
-        output = state
+        logits = self.fc_alpha(state) 
 
-        alpha = torch.softmax(self.fc_alpha(output), dim=-1)   # [B, num_matrices]
+        temperature = torch.clamp(self.log_temperature.exp(), 0.1, 2.0)
+        
+        if self.training:
+            alpha = nn.functional.gumbel_softmax(logits, tau=temperature, hard=False)
+        else:
+            alpha = nn.functional.softmax(logits / temperature, dim=-1)
         return alpha, state
 
     def init_state(self, batch_size, device):
