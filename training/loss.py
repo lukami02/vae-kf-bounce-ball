@@ -63,94 +63,93 @@ def transition_loss(z_seq, z_pred, Q):
 
     return (mahal + log_det).mean()
 
-def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, z_pred, P_pred, z_filt, P_filt, alpha_seq, C_matrices, R, Q, 
+def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, P_pred, P_filt, R, Q, 
                 cfg: VAEConfig, tcfg: TrainConfig, epoch):
     """
-    ball_seq,       # [B, T, H, W]     — ground truth
-    x_dist_filt,     # [B, T, H, W]    — reconstruction distribution from a_filt
-    x_dist_pred,     # [B, T, H, W]    — reconstruction distribution from a_pred
-    a_mu,           # [B*T, dim_a]     — encoder mean
-    a_var,          # [B*T, dim_a]     — encoder variance
-    z_pred,         # [B, T, dim_z]    — Kalman predicted state
-    P_pred,         # [B, T, dim_z, dim_z]
-    a_filt,         # [B, T, dim_a]    — C @ z_filt
-    alpha_seq,      # [B, T, K]
-    C_matrices,     # [K, dim_a, dim_z]
+    Computes ELBO loss:
+        F = log p(x|a) + log p(a|z) + log p(z|u) - log q(a|x) - log p(z|a,u)
+
+        ball_seq:    [B, T, H, W]            — ground truth frames
+        x_dist_filt: Bernoulli [B, T, H, W]  — reconstruction from filtered state
+        a_dist:      Normal [B, T, dim_a]    — encoder distribution q(a|x)
+        a_seq:       [B, T, dim_a]           — sample from a_dist
+        a_pred:      [B, T, dim_a]           — predicted observation from z_pred
+        a_filt:      [B, T, dim_a]           — filtered observation C @ z_filt
+        z_pred:      [B, T, dim_z]           — predicted latent state (rsample)
+        z_filt:      [B, T, dim_z]           — filtered latent state
+        P_pred:      [B, T, dim_z, dim_z]    — predicted state covariance
+        P_filt:      [B, T, dim_z, dim_z]    — filtered state covariance
+        R:           [dim_a, dim_a]          — observation noise covariance
+        Q:           [dim_z, dim_z]          — transition noise covariance
     """
-    B, T, H, W = ball_seq.shape
+    B, T, dim_z = z_filt.shape if z_filt is not None else (*a_seq.shape[:2], 0)
+    device = ball_seq.device
 
-    # Reconstruction loss  —  E_q[log p(x | a_filt)]
-    L_recon = -x_dist_filt.log_prob(ball_seq).sum(dim=(2,3)).mean()
+    # log p(x | a) — reconstruction
+    L_recon = -x_dist_filt.log_prob(ball_seq).sum(dim=(2, 3)).mean()
 
-    # Regularization loss  —  E_q[q(a | x)]
-    L_regularization = a_dist.log_prob(a_seq).sum(-1).mean()
+    if z_pred is not None and P_filt is not None:  # KVAE
+        # log p(a | z) — innovation
+        L_innov = D.MultivariateNormal(a_filt, R).log_prob(a_seq).mean()
 
-    if z_pred is not None and P_pred is not None: # KVAE
-        # Inovation loss — E_q[p(a | z)]
-        w = alpha_seq[:, 1:].unsqueeze(-1).unsqueeze(-1)                # [B, T-1, K, 1, 1]
-        C_seq = (w * C_matrices.unsqueeze(0).unsqueeze(0)).sum(dim=2)    # [B, T-1, dim_a, dim_z]
+        # log p(z | u) — state prior
+        L_prior_z0 = D.MultivariateNormal(
+            torch.zeros(dim_z, device=device, dtype=z_filt.dtype),
+            torch.eye(dim_z, device=device, dtype=z_filt.dtype)
+        ).log_prob(z_filt[:, 0, :]).mean()
 
-        z_pred_trim = z_pred[:, :-1, :]                                  # [B, T-1, dim_z]
-        a_pred = torch.bmm(
-            C_seq.reshape(-1, cfg.dim_a, cfg.dim_z),                     # [B*(T-1), dim_a, dim_z]
-            z_pred_trim.reshape(-1, cfg.dim_z, 1)                        # [B*(T-1), dim_z, 1]
-        ).squeeze(-1)                                                    # [B*(T-1), dim_a]
-        a_target = a_seq[:, 1:, :].reshape(-1, cfg.dim_a)                # [B*(T-1), dim_a]
-
-        kalman_observation_distrib = D.MultivariateNormal(a_pred, R)
-        kalman_observation_log_likelihood = kalman_observation_distrib.log_prob(a_target)  # [B*(T-1)]  za ovaj loss da pomnozi
-        L_innov = -kalman_observation_log_likelihood.mean()                           
-
-        # Prior loss E_q[ln p(z_t | z_{t-1})]
-
-        # z_0 ~ N(0, I)
-        z0_prior = D.MultivariateNormal(
-            loc=torch.zeros(cfg.dim_z, device=z_pred.device, dtype=z_pred.dtype),
-            covariance_matrix=torch.eye(cfg.dim_z, device=z_pred.device, dtype=z_pred.dtype)
-        )
-        L_prior_z0 = -z0_prior.log_prob(z_pred[:, 0, :]).mean()  # [B]
-
-        # z_t ~ N(z_pred_{t-1}, Q)  for t=1..T-1
-        z_prior_trans = D.MultivariateNormal(
-            loc=z_pred[:, :-1, :].reshape(-1, cfg.dim_z),                        # [B*(T-1), dim_z]
-            covariance_matrix=Q.unsqueeze(0).expand(B * (T - 1), -1, -1)         # [B*(T-1), dim_z, dim_z]
-        )
-        L_prior_trans = -z_prior_trans.log_prob(z_pred[:, 1:, :].reshape(-1, cfg.dim_z)).mean()  # [B*(T-1)]
+        L_prior_trans = D.MultivariateNormal(
+            z_pred[:, :-1, :].reshape(-1, dim_z),
+            Q.unsqueeze(0).expand(B * (T - 1), -1, -1)
+        ).log_prob(z_filt[:, 1:, :].reshape(-1, dim_z)).mean()
 
         L_prior = L_prior_z0 + L_prior_trans
 
-        # Posterior loss E_q[p(z | a)]
-        B, T, dim_z = z_pred.shape
-        
-        posterior_distrib = D.MultivariateNormal(loc=z_filt.reshape(-1, dim_z), covariance_matrix=P_filt.reshape(-1, dim_z, dim_z))
-        posterior_log_prob = posterior_distrib.log_prob(z_pred.reshape(-1, dim_z))  
-        L_posterior = posterior_log_prob.mean()
+        # log q(a | x) — encoder entropy
+        L_entropy = a_dist.log_prob(a_seq).sum(-1).mean()
 
-        L_pred = torch.tensor(0.0)
-        L_kl = torch.tensor(0.0)
+        # log p(z | a, u) — Kalman posterior 
+        L_posterior = D.MultivariateNormal(
+            z_filt[:, 1:, :].reshape(-1, dim_z),
+            P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
+        ).log_prob(z_pred[:, :-1, :].reshape(-1, dim_z)).mean()
 
-    else:
-        mu = a_dist.loc
-        log_var = a_dist.scale.log() * 2
-        L_kl = -0.5 * (1 + log_var - mu**2 - log_var.exp()).sum(-1)  # [B, T] 
-        L_kl = L_kl.mean()
+        kalman_elbo = L_innov + L_prior - L_entropy - L_posterior
+        loss = tcfg.lambda_recon * L_recon - tcfg.lambda_kalman * kalman_elbo
 
-        # Prediction loss
-        pred_dist = D.Normal(a_pred[:, :-1, :], torch.ones_like(a_pred[:, :-1, :]))
-        L_pred = -pred_dist.log_prob(a_seq[:, 1:, :]).sum(-1).mean()      # [B, T-1]
+        terms = {
+            "loss":      loss.item(),
+            "recon":     L_recon.item(),
+            "innov":     L_innov.item(),
+            "prior":     L_prior.item(),
+            "entropy":   L_entropy.item(),
+            "posterior": L_posterior.item(),
+        }
 
-        L_innov = torch.tensor(0.0)
-        L_posterior = torch.tensor(0.0)
-        L_prior = torch.tensor(0.0)
+    else:  # CV_VAE / GRU_VAE
+        # KL(q(a|x) || N(0,I)) — encoder regularization
+        mu  = a_dist.loc
+        var = a_dist.scale ** 2
+        L_regularization = 0.5 * (mu**2 + var - var.log() - 1).sum(-1).mean()
 
-    loss = (tcfg.lambda_recon * L_recon + tcfg.lambda_reg * L_regularization + tcfg.lambda_kalman * (L_innov + L_prior + L_posterior) + tcfg.get_lambda_kl(epoch) * L_kl)
+        # log p(a_{t+1} | z_pred_t) — prediction
+        a_dist_next = D.Normal(a_dist.loc[:, 1:, :], a_dist.scale[:, 1:, :])
+        L_prediction = -a_dist_next.log_prob(a_pred[:, :-1, :]).sum(-1).mean()
 
-    terms = {
-        "loss": loss.item(),
-        "recon": L_recon.item(),
-        "reg": L_regularization.item(),
-        "kalman": (L_innov + L_prior + L_posterior).item(),
-        "pred": L_pred.item()
-    }
+        # log q(a | x) — encoder entropy
+        L_entropy = a_dist.log_prob(a_seq).sum(-1).mean()
+
+        loss = (tcfg.lambda_recon * L_recon
+              + tcfg.lambda_pred * L_prediction
+              + tcfg.get_lambda_kl(epoch) * L_regularization
+              - tcfg.lambda_entropy * L_entropy)
+
+        terms = {
+            "loss":    loss.item(),
+            "recon":   L_recon.item(),
+            "reg":     L_regularization.item(),
+            "pred":    L_prediction.item(),
+            "entropy": L_entropy.item()
+        }
 
     return loss, terms

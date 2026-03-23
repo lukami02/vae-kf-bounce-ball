@@ -76,7 +76,11 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
 
 def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
     model.train()
-    total_terms = {"loss": 0, "recon": 0, "reg": 0, "kalman": 0}
+    if isinstance(model, KVAE):
+        total_terms = {"loss": 0, "recon": 0, "innov": 0, "prior": 0, "entropy": 0, "posterior": 0}
+    else:
+        total_terms = {"loss": 0, "recon": 0, "reg": 0, "pred": 0, "entropy": 0}
+
     for batch in loader:
         if len(batch) == 2:
             ball_seq, obstacle_img = batch
@@ -99,19 +103,18 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             a_dist     = a_dist,
             a_seq      = a_seq,
             a_pred     = a_pred,
+            a_filt     = a_filt,
             z_pred     = z_pred,
-            P_pred     = P_pred,
             z_filt     = z_filt,
+            P_pred     = P_pred,
             P_filt     = P_filt,
-            alpha_seq  = alpha_seq,
-            C_matrices = getattr(model, 'C_matrices', None),
             R          = R,
             Q          = Q,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch
         )
-
+        
         optimizer.zero_grad()
         loss.backward()
         if tcfg.grad_clip > 0:
@@ -129,7 +132,10 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
 @torch.no_grad()
 def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
     model.eval()
-    total_terms = {"loss": 0, "recon": 0, "reg": 0, "kalman": 0}
+    if isinstance(model, KVAE):
+        total_terms = {"loss": 0, "recon": 0, "innov": 0, "prior": 0, "entropy": 0, "posterior": 0}
+    else:
+        total_terms = {"loss": 0, "recon": 0, "reg": 0, "pred": 0, "entropy": 0}
 
     for batch in loader:
         if len(batch) == 2:
@@ -152,12 +158,11 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             a_dist     = a_dist,
             a_seq      = a_seq,
             a_pred     = a_pred,
+            a_filt     = a_filt,
             z_pred     = z_pred,
-            P_pred     = P_pred,
             z_filt     = z_filt,
+            P_pred     = P_pred,
             P_filt     = P_filt,
-            alpha_seq  = alpha_seq,
-            C_matrices = getattr(model, 'C_matrices', None),
             R          = R,
             Q          = Q,
             cfg        = cfg,
@@ -225,14 +230,27 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
         # INFO log 
         if epoch % tcfg.log_every == 0 or epoch == 1:
             lr = optimizer.param_groups[0]["lr"]
-            logger.info(
-                f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
-                f"loss={train_terms['loss']:.4f}  "
-                f"recon={train_terms['recon']:.4f}  "
-                f"reg={train_terms['reg']:.4f}  "
-                f"kalman={train_terms['kalman']:.4f} | "
-                f"val_loss={val_terms['loss']:.4f}"
-            )
+            if isinstance(model, KVAE):
+                logger.info(
+                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
+                    f"loss={train_terms['loss']:.4f}  "
+                    f"recon={train_terms['recon']:.4f}  "
+                    f"innov={train_terms['innov']:.4f}  "
+                    f"prior={train_terms['prior']:.4f}  "
+                    f"entropy={train_terms['entropy']:.4f}  "
+                    f"posterior={train_terms['posterior']:.4f} | "
+                    f"val_loss={val_terms['loss']:.4f}"
+                )
+            else:
+                logger.info(
+                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
+                    f"loss={train_terms['loss']:.4f}  "
+                    f"recon={train_terms['recon']:.4f}  "
+                    f"reg={train_terms['reg']:.4f}  "
+                    f"pred={train_terms['pred']:.4f}  "
+                    f"entropy={train_terms['entropy']:.4f} | "
+                    f"val_loss={val_terms['loss']:.4f}"
+                )
 
         # Checkpoint
         if epoch % tcfg.save_every == 0:
