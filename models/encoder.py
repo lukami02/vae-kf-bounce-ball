@@ -77,28 +77,22 @@ class ObstacleEncoder(nn.Module):
     """
     def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig):
         super().__init__()
-
         channels = [1] + vae_cfg.encoder_obstacle_channels
         layers = []
         for i in range(len(channels)-1):
-            layers += [nn.Conv2d(channels[i], channels[i+1], 3, stride=2, padding=1), vae_cfg.enc_activation()]
+            layers += [
+                nn.Conv2d(channels[i], channels[i+1], 3, stride=2, padding=1), 
+                vae_cfg.enc_activation()
+            ]
         self.cnn = nn.Sequential(*layers)
-
-        # Compute flat CNN output size dynamically
-        self._flat_size = self._get_flat_size(sim_cfg.size)
-
-        self.fc = nn.Sequential(
-            nn.Linear(self._flat_size, vae_cfg.dim_obstacle),
-            vae_cfg.enc_activation(),
-        )
-
-    def _get_flat_size(self, image_size):
-        dummy = torch.zeros(1, 1, image_size[0], image_size[1])
-        out = self.cnn(dummy)
-        return out.view(1, -1).shape[1]
+        
+        self.feature_proj = nn.Conv2d(vae_cfg.encoder_obstacle_channels[-1], vae_cfg.alpha_units, 1)
 
     def forward(self, obs_img):
-        B = obs_img.shape[0]
-        enc = self.cnn(obs_img)
-        enc = enc.view(B, -1)
-        return self.fc(enc)  # [B, obs_hidden_dim]
+        # obs_img: [B, 1, H, W]
+        features = self.cnn(obs_img) # [B, C, H', W']
+        features = self.feature_proj(features) # [B, alpha_units, H', W']
+        
+        B, C, H, W = features.shape
+        features = features.view(B, C, -1).transpose(1, 2)
+        return features
