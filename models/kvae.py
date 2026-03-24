@@ -72,7 +72,7 @@ class KVAE(BaseVAE):
         C += self.cfg.C_std * torch.randn_like(C)
         return C
 
-    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None):
+    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, phase=1):
         B, T, H, W = ball_seq.shape
 
         # Encode
@@ -83,6 +83,15 @@ class KVAE(BaseVAE):
             a_seq = a_dist.rsample()  
         else:
             a_seq = a_dist.mean
+
+        if phase == 0:
+            x_dist_filt = self.decode(a_seq)
+            return (
+                x_dist_filt, None,
+                a_dist, a_seq, None, None,
+                None, None, None, None,
+                None, None, None
+            )
 
         # Kalman filter
         z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq, R, Q = self.kalman(

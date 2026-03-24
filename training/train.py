@@ -89,6 +89,19 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
     else:
         raise ValueError(f"Unknown scheduler: {tcfg.lr_scheduler}")
 
+def freeze_kalman(model):
+    for param in model.alpha_net.parameters():
+        param.requires_grad = False
+    for param in model.kalman.parameters():
+        param.requires_grad = False
+    model.A_matrices.requires_grad = False
+    model.C_matrices.requires_grad = False
+    if model.B_matrices is not None:
+        model.B_matrices.requires_grad = False
+
+def unfreeze_all(model):
+    for param in model.parameters():
+        param.requires_grad = True
 
 def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
     model.train()
@@ -145,6 +158,55 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
     n = len(loader)
     return {k: v / n for k, v in total_terms.items()}
 
+def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
+    model.train()
+    total_terms = {"loss": 0}
+
+    for batch in loader:
+        if len(batch) == 2:
+            ball_seq, obstacle_img = batch
+            u_seq = None
+        else:
+            ball_seq, obstacle_img, u_seq = batch
+
+        ball_seq     = ball_seq.to(device)
+        obstacle_img = obstacle_img.to(device)
+        u_seq        = u_seq.to(device) if u_seq is not None else None
+    
+        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
+
+        loss, terms = compute_loss(
+            ball_seq   = ball_seq,
+            x_dist_filt = x_dist_filt,
+            a_dist     = a_dist,
+            a_seq      = a_seq,
+            a_pred     = None,
+            a_filt     = None,
+            z_pred     = None,
+            z_filt     = None,
+            P_pred     = None,
+            P_filt     = None,
+            R          = None,
+            Q          = None,
+            alpha_seq  = None,
+            cfg        = cfg,
+            tcfg       = tcfg,
+            epoch      = epoch,
+            phase      = 0
+        )
+        
+        optimizer.zero_grad()
+        loss.backward()
+        if tcfg.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
+        optimizer.step()
+
+        for k, v in terms.items():
+            if k in total_terms:
+                total_terms[k] += v
+
+    n = len(loader)
+    return {k: v / n for k, v in total_terms.items()}
 
 @torch.no_grad()
 def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
@@ -223,6 +285,28 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     logger.info("=" * 60)
 
     best_val_loss = float("inf")
+    
+    if isinstance(model, KVAE):
+        freeze_kalman(model)
+    logger.info("=" * 60)
+    logger.info("Starting training")
+    logger.info(f"Phase 1: VAE pretraining for {tcfg.vae_pretrain_epochs} epochs")
+    logger.info("=" * 60)
+    for epoch in range(1, tcfg.vae_pretrain_epochs + 1):
+        pretrain_terms = pretrain_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device)
+        if scheduler is not None:
+            scheduler.step()
+        if epoch % tcfg.log_every == 0 or epoch == 1:
+            lr = optimizer.param_groups[0]["lr"]
+            logger.info(
+                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
+                    f"loss={pretrain_terms['loss']:.4f}  ")
+
+    unfreeze_all(model)
+
+    logger.info("=" * 60)
+    logger.info("Phase 2: Full training")
+    logger.info("=" * 60)
 
     for epoch in range(1, tcfg.epochs + 1):
 

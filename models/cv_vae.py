@@ -14,7 +14,7 @@ class CVVAE(BaseVAE):
     def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig):
         super().__init__(cfg, sim_cfg)
 
-    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None):
+    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, phase=1):
         B, T, H, W = ball_seq.shape
 
         a_dist, h_obs = self.encode(ball_seq, obstacle_img)   # [B, T, dim_a]

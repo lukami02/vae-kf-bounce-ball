@@ -23,7 +23,7 @@ class GRUVAE(BaseVAE):
 
         self.fc_pred = nn.Linear(cfg.gru_hidden_dim, cfg.dim_a)
 
-    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None):
+    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, phase=1):
         """
         ball_seq:     [B, T, H, W]
         obstacle_img: [B, H, W]

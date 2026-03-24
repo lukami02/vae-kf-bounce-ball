@@ -69,7 +69,7 @@ def alpha_entropy_loss(alpha_seq):
     return -entropy.mean() 
 
 def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, P_pred, P_filt, R, Q, alpha_seq,
-                cfg: VAEConfig, tcfg: TrainConfig, epoch):
+                cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
     """
     Computes ELBO loss:
         F = log p(x|a) + log p(a|z) + log p(z|u) - log q(a|x) - log p(z|a,u)
@@ -99,6 +99,21 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
         pos_weight=pos_weight,
         reduction='none'
     ).sum(dim=(2, 3)).mean()
+
+    if phase == 0:
+        # KL(q(a|x) || N(0,I)) — encoder regularization
+        mu  = a_dist.loc
+        var = a_dist.scale ** 2
+        L_regularization = 0.5 * (mu**2 + var - var.log() - 1).sum(-1).mean()
+
+        loss = (tcfg.lambda_recon * L_recon
+              + tcfg.get_lambda_kl(epoch) * L_regularization)
+
+        terms = {
+            "loss":    loss.item(),
+        }
+        
+        return loss, terms
 
     if z_pred is not None and P_filt is not None:  # KVAE
         # log p(a | z) — innovation
