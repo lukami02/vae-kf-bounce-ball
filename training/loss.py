@@ -117,11 +117,12 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
 
     if z_pred is not None and P_filt is not None:  # KVAE
         # log p(a | z) — innovation
+
         #L_innov = - D.MultivariateNormal(
         #    a_pred[:, :-1, :].reshape(-1, cfg.dim_a),
-        #    R
-        #).log_prob(a_seq[:, :-1, :].reshape(-1, cfg.dim_a)).mean()
-
+        #    R + P_pred[:, :-1, :, :]
+        #).log_prob(a_seq[:, 1:, :].reshape(-1, cfg.dim_a)).mean()
+        
         L_innov = - D.MultivariateNormal(a_filt, R).log_prob(a_seq).mean()
 
         # log p(z | u) — state prior

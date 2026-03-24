@@ -6,10 +6,10 @@ import torch.optim as optim
 class TrainConfig:
 
     # Training
-    epochs: int = 50
-    vae_pretrain_epochs: int = 20
-    batch_size: int = 128
-    learning_rate: float = 5e-4
+    epochs: int = 100
+    vae_pretrain_epochs: int = 40
+    batch_size: int = 256
+    learning_rate: float = 1e-3
     grad_clip: float = 1.0
     seed: int = 42
     val_split:  float = 0.1    
@@ -25,10 +25,10 @@ class TrainConfig:
 
     # Loss weights
     
-    lambda_recon: float = 0.4      # reconstruction loss
-    lambda_innov: float = 1.0      # innovation loss
-    lambda_posterior: float = 0.1  # posterior loss
-    lambda_prior: float = 0.2      # prior loss
+    lambda_recon: float = 1.0      # reconstruction loss
+    lambda_innov: float = 1.5      # innovation loss
+    lambda_posterior: float = 0.0  # posterior loss
+    lambda_prior: float = 0.3      # prior loss
     lambda_entropy: float = 0.1    # Entropy loss
     lambda_alpha: float = 0.05     # Alpha loss
 
@@ -47,7 +47,7 @@ class TrainConfig:
     # Free-running training
     free_running_steps: int = 10     # autoregressive rollout length
     free_running_warmup: int = 20
-    p_mask: float = 0.1
+    p_mask: float = 0.2
 
     # Logging
     log_every: int = 5

@@ -132,7 +132,7 @@ class BouncingBallSim:
 
             img[y_min:y_max,x_min:x_max] = g
         else:
-            r = 2*self.r
+            r = 3*self.r
             cv2.circle(img, center=(int(x0), int(y0)), radius=int(r), color=1.0, thickness=-1)
         return img
     
