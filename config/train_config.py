@@ -14,7 +14,7 @@ class TrainConfig:
     seed: int = 42
     val_split:  float = 0.1    
     test_split: float = 0.01
-    pos_weight: float = 10.0      # binary cross entropy positive class weight
+    pos_weight: float = 5.0      # binary cross entropy positive class weight
 
     # Optimizer
     optimizer: str   = "adamw"     
@@ -27,7 +27,7 @@ class TrainConfig:
     
     lambda_recon: float = 1.0      # reconstruction loss
     lambda_innov: float = 1.2      # innovation loss
-    lambda_posterior: float = 0.0  # posterior loss
+    lambda_posterior: float = 0.1  # posterior loss
     lambda_prior: float = 0.4      # prior loss
     lambda_entropy: float = 0.1    # Entropy loss
     lambda_alpha: float = 0.1      # Alpha loss
@@ -36,18 +36,14 @@ class TrainConfig:
     lambda_kl: float = 1           # KL divergence
     lambda_reg: float = 0.3        # Regularization loss
 
-
     # KL annealing
     kl_annealing: bool = True
     kl_warmup_epochs: int = 10  
 
-    # Prediction loss warmup
-    pred_warmup_epochs: int = 10     
-
     # Free-running training
-    free_running_steps: int = 10     # autoregressive rollout length
-    free_running_warmup: int = 20
-    p_mask: float = 0.2
+    free_running_steps: int = 15     # autoregressive rollout length
+    free_running_warmup: int = 50
+    p_mask: float = 0.1
 
     # Logging
     log_every: int = 5

@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.distributions as D
+import math
 from config.train_config import TrainConfig
 from config.vae_config import VAEConfig
 
@@ -71,9 +72,13 @@ def transition_loss(z_seq, z_pred, Q):
     return (mahal + log_det).mean()
 
 def diversity_loss(alpha_batch):
-    avg_usage = alpha_batch.mean(dim=[0, 1])
-    target = torch.ones_like(avg_usage) / avg_usage.shape[0]
-    return F.mse_loss(avg_usage, target)
+    # alpha_batch: [B, T, K]
+    avg_usage = alpha_batch.mean(dim=[0, 1])  
+    
+    H = -(avg_usage * (avg_usage + 1e-8).log()).sum()
+    H_max = math.log(avg_usage.shape[0])  # log(K)
+    
+    return H_max - H
 
 def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):

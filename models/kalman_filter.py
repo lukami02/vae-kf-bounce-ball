@@ -42,7 +42,7 @@ class KalmanFilter(nn.Module):
         device = self._mat_R.device
         return self._mat_R @ self._mat_R.T + torch.eye(self.cfg.dim_a, device=device) * self.cfg.QR_reg    # [dim_a, dim_a]         
 
-    def forward(self, a_seq, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None):
+    def forward(self, a_seq, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None, temp=0.1):
         """
         a_seq:       [B, T, dim_a]      — encoder sequence
         alpha_net:   AlphaNetwork       
@@ -78,7 +78,7 @@ class KalmanFilter(nn.Module):
         # init alpha
         a_prev    = self.a_0.unsqueeze(0).expand(B, -1)                       # [B, dim_a]
         gru_state = alpha_net.init_state(B, device)
-        alpha_k, gru_state = alpha_net(a_prev, h_obs, z.detach(), gru_state)
+        alpha_k, gru_state = alpha_net(a_prev, h_obs, z.detach(), gru_state, temp=temp)
 
         z_filt_list = []
         P_filt_list = []
@@ -133,7 +133,7 @@ class KalmanFilter(nn.Module):
 
             # Update alpha
             a_for_alpha = mask_k * a_k + (1 - mask_k) * a_filt_k              # [B, dim_a]
-            alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, z_filt.detach(), gru_state)
+            alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, z_filt, gru_state, temp=temp)
             alpha_list.append(alpha_k)
 
             w   = alpha_k.unsqueeze(-1).unsqueeze(-1)

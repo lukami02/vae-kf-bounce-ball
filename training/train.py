@@ -81,7 +81,7 @@ def get_optimizer(model, tcfg: TrainConfig):
 
 def get_scheduler(optimizer, tcfg: TrainConfig):
     if tcfg.lr_scheduler == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.epochs)
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.epochs, eta_min=1e-5)
     elif tcfg.lr_scheduler == "step":
         return torch.optim.lr_scheduler.StepLR(optimizer, step_size=tcfg.lr_step_size, gamma=tcfg.lr_gamma)
     elif tcfg.lr_scheduler == "none":
@@ -121,10 +121,10 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
         if mask is not None:
-            current_mask = mask.expand(batch[0].shape[0], -1)
+            current_mask = mask[:ball_seq.shape[0], :]
         else: current_mask = None
     
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -209,7 +209,7 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
     return {k: v / n for k, v in total_terms.items()}
 
 @torch.no_grad()
-def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
+def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
     model.eval()
     if isinstance(model, KVAE):
         total_terms = {"loss": 0, "recon": 0, "innov": 0, "prior": 0, "entropy": 0, "posterior": 0}
@@ -227,7 +227,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
         if mask is not None:
-            current_mask = mask.expand(batch[0].shape[0], -1)
+            current_mask = mask[:ball_seq.shape[0], :]
         else: current_mask = None
 
         (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
@@ -269,6 +269,23 @@ def save_checkpoint(model, optimizer, epoch, terms, tcfg, logger, path=None):
     }, path)
     logger.info(f"Checkpoint saved: {path}")
 
+def make_mask(B, T, device, free_running_steps, p_mask, randomize_start=False):
+        mask = torch.ones(B, T, device=device)
+        
+        for b in range(B):
+            if randomize_start:
+                max_start = max(T - free_running_steps, T // 2 + 1)
+                min_start = T // 2
+                start = torch.randint(min_start, max_start, (1,)).item()
+            else:
+                start = T - free_running_steps
+            mask[b, start:start + free_running_steps] = 0.0
+        
+        rand_mask = torch.rand(B, T, device=device) < p_mask
+        rand_mask[:, :int(0.1 * T)] = False
+        mask[rand_mask] = 0.0
+        
+        return mask
 
 def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     model = model.to(device)
@@ -303,25 +320,21 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                     f"loss={pretrain_terms['loss']:.4f}  ")
 
     unfreeze_all(model)
-
+    scheduler = get_scheduler(optimizer, tcfg)
+    
     logger.info("=" * 60)
     logger.info("Phase 2: Full training")
     logger.info("=" * 60)
 
     for epoch in range(1, tcfg.epochs + 1):
-
-        mask_val = torch.ones(sim_cfg.T, device=device)
-        mask_val[sim_cfg.T - tcfg.free_running_steps:] = 0.0
+        B = tcfg.batch_size
+        T = sim_cfg.T
         if epoch >= tcfg.free_running_warmup:
-            mask = mask_val.clone()
-            rand_mask = torch.rand(sim_cfg.T, device=device) < tcfg.p_mask
-            rand_mask[:int(0.2*sim_cfg.T)] = False
-            mask[rand_mask] = 0.0
+            mask = make_mask(B, T, device, tcfg.free_running_steps, tcfg.p_mask, randomize_start=True)
         else:
-            mask = torch.ones(sim_cfg.T, device=device)
-            rand_mask = torch.rand(sim_cfg.T, device=device) < tcfg.p_mask
-            rand_mask[:int(0.2*sim_cfg.T)] = False
-            mask[rand_mask] = 0.0
+            mask = make_mask(B, T, device, int(tcfg.free_running_steps * epoch / tcfg.free_running_warmup), tcfg.p_mask, randomize_start=True)
+
+        mask_val = make_mask(B, T, device, tcfg.free_running_steps, p_mask=0.0, randomize_start=False)
 
         train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
         val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)

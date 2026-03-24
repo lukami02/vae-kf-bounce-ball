@@ -33,9 +33,7 @@ class AlphaNetwork(nn.Module):
             nn.Linear(cfg.alpha_units // 2, cfg.num_matrices)
         )
 
-        self.log_temperature = nn.Parameter(torch.log(torch.tensor(0.5)))
-
-    def forward(self, a_k, h_obs_features, z_filt, state=None, u_k=None):
+    def forward(self, a_k, h_obs_features, z_filt, state=None, u_k=None, temp=0.1):
         # h_obs_features [B, N, alpha_units] 
 
         if self.cfg.num_matrices == 1:
@@ -62,9 +60,8 @@ class AlphaNetwork(nn.Module):
         logits = self.fc_alpha(state)
 
         # Gumbel-Softmax 
-        temp = torch.clamp(self.log_temperature.exp(), 0.1, 1.0)
         if self.training:
-            alpha = nn.functional.gumbel_softmax(logits, tau=temp, hard=True)
+            alpha = nn.functional.gumbel_softmax(logits, tau=temp, hard=False)
         else:
             alpha = nn.functional.softmax(logits / temp, dim=-1)
             

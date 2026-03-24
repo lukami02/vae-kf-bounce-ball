@@ -72,7 +72,7 @@ class KVAE(BaseVAE):
         C += self.cfg.C_std * torch.randn_like(C)
         return C
 
-    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, phase=1):
+    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, epoch=100, phase=1):
         B, T, H, W = ball_seq.shape
 
         # Encode
@@ -103,6 +103,7 @@ class KVAE(BaseVAE):
             B_matrices  = self.B_matrices,
             u_seq       = u_seq,
             mask        = mask,
+            temp        = self.cfg.get_temperature(epoch)
         )
 
         # Decode
