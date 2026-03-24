@@ -117,6 +117,11 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
 
     if z_pred is not None and P_filt is not None:  # KVAE
         # log p(a | z) — innovation
+        #L_innov = - D.MultivariateNormal(
+        #    a_pred[:, :-1, :].reshape(-1, cfg.dim_a),
+        #    R
+        #).log_prob(a_seq[:, :-1, :].reshape(-1, cfg.dim_a)).mean()
+
         L_innov = - D.MultivariateNormal(a_filt, R).log_prob(a_seq).mean()
 
         # log p(z | u) — state prior
@@ -133,7 +138,7 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
         L_prior = L_prior_z0 + L_prior_trans
 
         # log q(a | x) — encoder entropy
-        L_entropy = a_dist.log_prob(a_seq).sum(-1).mean()
+        L_entropy = - a_dist.log_prob(a_seq).sum(-1).mean()
 
         # log p(z | a, u) — Kalman posterior 
         P_filt_reg = P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
@@ -149,7 +154,7 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
 
         loss = (tcfg.lambda_recon * L_recon +
                 tcfg.lambda_innov * L_innov +
-                tcfg.lambda_posterior * L_posterior +
+                tcfg.lambda_posterior * L_posterior -
                 tcfg.lambda_prior * L_prior -
                 tcfg.lambda_entropy * L_entropy +
                 tcfg.lambda_alpha * L_alpha
@@ -175,7 +180,7 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
         L_prediction = -a_dist_next.log_prob(a_pred[:, :-1, :]).sum(-1).mean()
 
         # log q(a | x) — encoder entropy
-        L_entropy = a_dist.log_prob(a_seq).sum(-1).mean()
+        L_entropy =  a_dist.log_prob(a_seq).sum(-1).mean()
 
         loss = (tcfg.lambda_recon * L_recon
               + tcfg.lambda_pred * L_prediction

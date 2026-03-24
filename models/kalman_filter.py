@@ -120,12 +120,15 @@ class KalmanFilter(nn.Module):
             P_filt = (P_filt + P_filt.transpose(1, 2)) / 2.0
 
             # Filtered output
+            """
             if self.training:
                 a_filt_k = D.MultivariateNormal(
                     torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1), self.R
                 ).rsample()
             else:
                 a_filt_k = torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)
+            """
+            a_filt_k = mask_k * a_k + (1 - mask_k) * torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)
 
             # Update alpha
             a_for_alpha = mask_k * a_k + (1 - mask_k) * a_filt_k              # [B, dim_a]
