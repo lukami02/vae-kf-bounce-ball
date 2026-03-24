@@ -8,7 +8,7 @@ class TrainConfig:
     # Training
     epochs: int = 50
     batch_size: int = 128
-    learning_rate: float = 5e-3
+    learning_rate: float = 5e-4
     grad_clip: float = 1.0
     seed: int = 42
     val_split:  float = 0.1    
@@ -17,18 +17,19 @@ class TrainConfig:
 
     # Optimizer
     optimizer: str   = "adamw"     
-    weight_decay: float = 1e-5       
+    weight_decay: float = 1e-4       
     lr_scheduler: str = "cosine" 
     lr_step_size: int = 50 
     lr_gamma: float = 0.5       
 
     # Loss weights
     
-    lambda_recon: float = 0.5      # reconstruction loss
-    lambda_innov: float = 0.9      # innovation loss
+    lambda_recon: float = 0.4      # reconstruction loss
+    lambda_innov: float = 0.2      # innovation loss
     lambda_posterior: float = 0.1  # posterior loss
-    lambda_prior: float = 0.9      # prior loss
-    lambda_entropy: float = 0.5    # Entropy loss
+    lambda_prior: float = 0.2      # prior loss
+    lambda_entropy: float = 0.2    # Entropy loss
+    lambda_alpha: float = 0.05     # Alpha loss
 
     lambda_pred: float = 0.3       # prediction loss
     lambda_kl: float = 1           # KL divergence

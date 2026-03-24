@@ -32,7 +32,7 @@ class AlphaNetwork(nn.Module):
         if self.cfg.dim_u > 0 and u_k is not None:
             parts.append(u_k)
         inputs = torch.cat(parts, dim=-1)                      # [B, input_dim]
-
+        inputs = nn.functional.dropout(inputs, p=0.1, training=self.training)
         state  = self.gru(inputs, state)                       # [B, alpha_units]
         logits = self.fc_alpha(state) 
 

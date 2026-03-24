@@ -52,13 +52,29 @@ def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.
     logger.addHandler(fh)
 
     return logger
-
-
+    
 def get_optimizer(model, tcfg: TrainConfig):
+    if isinstance(model, KVAE):
+        param_groups = [
+            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate},
+            {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
+            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate},
+            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate * 0.3},
+            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.3},
+            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.1},
+            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.1},
+        ]
+        if model.B_matrices is not None:
+            param_groups.append(
+                {"params": [model.B_matrices], "lr": tcfg.learning_rate * 0.1}
+            )
+    else:
+        param_groups = [{"params": model.parameters(), "lr": tcfg.learning_rate}]
+
     if tcfg.optimizer == "adam":
-        return torch.optim.Adam(model.parameters(), lr=tcfg.learning_rate)
+        return torch.optim.Adam(param_groups)
     elif tcfg.optimizer == "adamw":
-        return torch.optim.AdamW(model.parameters(), lr=tcfg.learning_rate, weight_decay=tcfg.weight_decay)
+        return torch.optim.AdamW(param_groups, weight_decay=tcfg.weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {tcfg.optimizer}")
 
@@ -110,6 +126,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             P_filt     = P_filt,
             R          = R,
             Q          = Q,
+            alpha_seq  = alpha_seq,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch
@@ -165,6 +182,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             P_filt     = P_filt,
             R          = R,
             Q          = Q,
+            alpha_seq  = alpha_seq,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch

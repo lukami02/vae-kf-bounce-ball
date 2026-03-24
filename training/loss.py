@@ -63,7 +63,12 @@ def transition_loss(z_seq, z_pred, Q):
 
     return (mahal + log_det).mean()
 
-def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, P_pred, P_filt, R, Q, 
+def alpha_entropy_loss(alpha_seq):
+    eps = 1e-8
+    entropy = - (alpha_seq * (alpha_seq + eps).log()).sum(dim=-1)
+    return -entropy.mean() 
+
+def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, P_pred, P_filt, R, Q, alpha_seq,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch):
     """
     Computes ELBO loss:
@@ -124,11 +129,15 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
             P_filt_reg
         ).log_prob(z_pred[:, :-1, :].reshape(-1, dim_z)).mean()
 
+        # alpha entropy
+        L_alpha =  alpha_entropy_loss(alpha_seq)
+
         loss = (tcfg.lambda_recon * L_recon +
                 tcfg.lambda_innov * L_innov +
                 tcfg.lambda_posterior * L_posterior +
                 tcfg.lambda_prior * L_prior -
-                tcfg.lambda_entropy * L_entropy
+                tcfg.lambda_entropy * L_entropy +
+                tcfg.lambda_alpha * L_alpha
         )
 
         terms = {

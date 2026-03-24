@@ -33,7 +33,7 @@ class KVAE(BaseVAE):
         else:
             self.B_matrices = None
 
-    def init_A_matrices(self, dt=0.1):
+    def init_A_matrices(self, dt=1.0):
         K, dim_z = self.cfg.num_matrices, self.cfg.dim_z
         A = torch.zeros(K, dim_z, dim_z)
         

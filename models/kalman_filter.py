@@ -78,7 +78,7 @@ class KalmanFilter(nn.Module):
         # init alpha
         a_prev    = self.a_0.unsqueeze(0).expand(B, -1)                       # [B, dim_a]
         gru_state = alpha_net.init_state(B, device)
-        alpha_k, gru_state = alpha_net(a_prev, h_obs, gru_state)
+        alpha_k, gru_state = alpha_net(a_prev, h_obs, z.detach(), gru_state)
 
         z_filt_list = []
         P_filt_list = []
