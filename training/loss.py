@@ -16,29 +16,36 @@ def kl_divergence_gaussian(mu_q, var_q, mu_p, var_p):
     kl = 0.5 * (torch.log(var_p / (var_q + 1e-8)) + var_q / (var_p + 1e-8) + (mu_q - mu_p) ** 2 / (var_p + 1e-8)- 1.0)
     return kl.sum(dim=-1)   # [B*T]
 
-
-def innovation_loss(r_k, R):
+def innovation_loss(a_pred, a_seq, S_pred):
     """
-    Negative log likelihood of innovation.
-    L = r_k^T S_k^{-1} r_k + log|S_k|
+    Stable innovation negative log-likelihood.
 
-    r_k: [B, T, dim_a]          — innovation a_k - C_k @ z_pred_k
-    S_k: [B, T, dim_a, dim_a]   — innovation covariance C @ P_pred @ C^T + R_k
+    a_pred : [B, T, dim_a]        — predicted observation 
+    a_seq  : [B, T, dim_a]        — true observation
+    S_pred : [B, T, dim_a, dim_a] — innovation covariance (C P_pred C^T + R)
     """
-    B, T, dim_a = r_k.shape
 
-    r = r_k.view(B * T, dim_a, 1)         
+    B, T, dim_a = a_pred.shape
+    device = a_pred.device
 
-    R_inv = torch.linalg.inv(R)        
-    R_inv = R_inv.unsqueeze(0)                                    
+    mu = a_pred[:, :-1, :]         # [B, T-1, dim_a]
+    x  = a_seq[:, 1:, :]           # [B, T-1, dim_a]
+    S  = S_pred[:, :-1, :, :]      # [B, T-1, dim_a, dim_a]
 
-    mahal = torch.bmm(r.transpose(1,2), torch.bmm(R_inv.expand(r.shape[0],-1,-1), r))
-    mahal = mahal.squeeze()
+    mu = mu.reshape(-1, dim_a)
+    x  = x.reshape(-1, dim_a)
+    S  = S.reshape(-1, dim_a, dim_a)
 
-    # log|S|
-    log_det = torch.linalg.slogdet(R)[1]    
+    I = torch.eye(dim_a, device=device).unsqueeze(0)
 
-    return (mahal + log_det).mean()
+    S = 0.5 * (S + S.transpose(-1, -2))     # enforce symmetry
+    S = S + 1e-4 * I                        # jitter
+
+    L = torch.linalg.cholesky(S)
+
+    dist = D.MultivariateNormal(mu, scale_tril=L)
+
+    return -dist.log_prob(x).mean()
 
 def transition_loss(z_seq, z_pred, Q):
     """
@@ -68,7 +75,7 @@ def alpha_entropy_loss(alpha_seq):
     entropy = - (alpha_seq * (alpha_seq + eps).log()).sum(dim=-1)
     return -entropy.mean() 
 
-def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, P_pred, P_filt, R, Q, alpha_seq,
+def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
     """
     Computes ELBO loss:
@@ -117,13 +124,7 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
 
     if z_pred is not None and P_filt is not None:  # KVAE
         # log p(a | z) — innovation
-
-        #L_innov = - D.MultivariateNormal(
-        #    a_pred[:, :-1, :].reshape(-1, cfg.dim_a),
-        #    R + P_pred[:, :-1, :, :]
-        #).log_prob(a_seq[:, 1:, :].reshape(-1, cfg.dim_a)).mean()
-        
-        L_innov = - D.MultivariateNormal(a_filt, R).log_prob(a_seq).mean()
+        L_innov = innovation_loss(a_pred, a_seq, S_pred)
 
         # log p(z | u) — state prior
         L_prior_z0 = - D.MultivariateNormal(
@@ -155,7 +156,7 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
 
         loss = (tcfg.lambda_recon * L_recon +
                 tcfg.lambda_innov * L_innov +
-                tcfg.lambda_posterior * L_posterior -
+                tcfg.lambda_posterior * L_posterior +
                 tcfg.lambda_prior * L_prior -
                 tcfg.lambda_entropy * L_entropy +
                 tcfg.lambda_alpha * L_alpha

@@ -26,11 +26,11 @@ class TrainConfig:
     # Loss weights
     
     lambda_recon: float = 1.0      # reconstruction loss
-    lambda_innov: float = 1.5      # innovation loss
+    lambda_innov: float = 1.2      # innovation loss
     lambda_posterior: float = 0.0  # posterior loss
-    lambda_prior: float = 0.3      # prior loss
+    lambda_prior: float = 0.4      # prior loss
     lambda_entropy: float = 0.1    # Entropy loss
-    lambda_alpha: float = 0.05     # Alpha loss
+    lambda_alpha: float = 0.1      # Alpha loss
 
     lambda_pred: float = 0.3       # prediction loss
     lambda_kl: float = 1           # KL divergence

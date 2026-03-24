@@ -70,7 +70,7 @@ def predict_multistep(model, ball_seq, obstacle_img, n_steps, device):
     (x_dist_filt, x_dist_pred,
      a_dist, a_seq, a_filt, a_pred,
      z_filt, P_filt, z_pred, P_pred,
-    alpha_seq, R, Q) = model(ball_seq, obstacle_img, mask=mask)
+     S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, mask=mask)
 
     return {
         "a_mu":        to_numpy(a_dist.loc[0]),
@@ -112,7 +112,7 @@ def compute_mse_per_step(model, loader, max_steps, device):
             (x_dist_filt, x_dist_pred,
             a_dist, a_seq, a_filt, a_pred,
             z_filt, P_filt, z_pred, P_pred,
-            alpha_seq, R, Q) = model(ball_seq, obstacle_img, mask=mask)
+            S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, mask=mask)
 
             mse = ((x_dist_filt.mean[:, T - n:] - ball_seq[:, T - n:]) ** 2).mean().item()
             mse_per_step[n - 1] += mse * B
@@ -143,7 +143,7 @@ def compute_metrics(model, loader, device):
         (x_dist_filt, x_dist_pred,
         a_dist, a_seq, a_filt, a_pred,
         z_filt, P_filt, z_pred, P_pred,
-        alpha_seq, R, Q) = model(ball_seq, obstacle_img)
+        S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img)
 
         # Reconstruction MSE
         recon_mse = ((x_dist_filt.mean - ball_seq) ** 2).mean().item()

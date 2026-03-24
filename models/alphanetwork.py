@@ -12,29 +12,38 @@ class AlphaNetwork(nn.Module):
         super().__init__()
         self.cfg = cfg
         assert cfg.dim_u == 0 or cfg.dim_u == cfg.dim_a, "dim_u must be 0 or equal to dim_a for consistent input"
-        self.input_dim = cfg.dim_a + cfg.dim_obstacle + cfg.dim_u + cfg.dim_z
 
-        self.gru = nn.GRUCell(self.input_dim, cfg.alpha_units)
+        self.var_proj = nn.Sequential(
+            nn.Linear(cfg.dim_a + cfg.dim_z, cfg.alpha_units),
+            nn.Tanh()
+        )
+
+        self.gru = nn.GRUCell(cfg.alpha_units + cfg.dim_obstacle + cfg.dim_u, cfg.alpha_units)
+
         self.fc_alpha = nn.Sequential(
             nn.Linear(cfg.alpha_units, cfg.alpha_units // 2),
             nn.Tanh(),
             nn.Linear(cfg.alpha_units // 2, cfg.num_matrices)
         )
 
-        self.log_temperature = nn.Parameter(torch.tensor(0.0))
+        self.log_temperature = nn.Parameter(torch.log(torch.tensor(0.5)))  
 
     def forward(self, a_k, h_obs, z_filt, state=None, u_k=None):
         if self.cfg.num_matrices == 1:
             B = a_k.shape[0]
             return torch.ones(B, 1, device=a_k.device), state
 
-        parts = [a_k, h_obs, z_filt]
+        var_input = torch.cat([a_k, z_filt], dim=-1)               # [B, dim_a + dim_z]
+        var_input = self.var_proj(var_input)                       # [B, alpha_units]
+
+        inputs = torch.cat([var_input, h_obs], dim=-1)             # [B, alpha_units + dim_obstacle]
         if self.cfg.dim_u > 0 and u_k is not None:
-            parts.append(u_k)
-        inputs = torch.cat(parts, dim=-1)                      # [B, input_dim]
+            inputs = torch.cat([inputs, u_k], dim=-1)
+
         inputs = nn.functional.dropout(inputs, p=0.1, training=self.training)
-        state  = self.gru(inputs, state)                       # [B, alpha_units]
-        logits = self.fc_alpha(state) 
+
+        state = self.gru(inputs, state)                             # [B, alpha_units]
+        logits = self.fc_alpha(state)
 
         temperature = torch.clamp(self.log_temperature.exp(), 0.1, 2.0)
         

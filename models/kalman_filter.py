@@ -87,6 +87,7 @@ class KalmanFilter(nn.Module):
         a_filt_list = []
         a_pred_list = []
         alpha_list  = []
+        S_list      = []
 
         for k in range(T):
             a_k    = a_seq[:, k, :]                                           # [B, dim_a]
@@ -152,6 +153,8 @@ class KalmanFilter(nn.Module):
             P_pred = torch.bmm(A_k, torch.bmm(P_filt, A_k.transpose(1, 2))) + Q  # [B, dim_z, dim_z]
             P_pred = (P_pred + P_pred.transpose(1, 2)) / 2.0
 
+            S_pred = torch.bmm(C_k, torch.bmm(P_pred, C_k.transpose(1, 2))) + self.R.unsqueeze(0).expand(B, -1, -1)
+
             # Observation prediction
             a_pred_k = torch.bmm(C_k, z_pred.unsqueeze(-1)).squeeze(-1)       # [B, dim_a]
 
@@ -160,6 +163,7 @@ class KalmanFilter(nn.Module):
                 P_filt = P_filt.detach()
                 z_pred = z_pred.detach()
                 P_pred = P_pred.detach()
+                S_pred = S_pred.detach()
 
             z_filt_list.append(z_filt)
             P_filt_list.append(P_filt)
@@ -167,6 +171,7 @@ class KalmanFilter(nn.Module):
             P_pred_list.append(P_pred)
             a_filt_list.append(a_filt_k)
             a_pred_list.append(a_pred_k)
+            S_list.append(S_pred)
 
             z = z_pred
             P = P_pred
@@ -178,5 +183,6 @@ class KalmanFilter(nn.Module):
         a_filt    = torch.stack(a_filt_list, dim=1)   # [B, T, dim_a]
         a_pred    = torch.stack(a_pred_list, dim=1)   # [B, T, dim_a]
         alpha_seq = torch.stack(alpha_list,  dim=1)   # [B, T, K]
+        S_pred    = torch.stack(S_list,  dim=1)       # [B, T, dim_a, dim_a]
 
-        return z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq, self.R, self.Q
+        return z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, self.R, self.Q

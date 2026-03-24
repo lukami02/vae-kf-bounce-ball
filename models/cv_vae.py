@@ -53,4 +53,5 @@ class CVVAE(BaseVAE):
         return (x_dist_filt, x_dist_pred, 
             a_dist, a_seq, a_filt, a_pred,
             None, None, None, None, 
-            None, None, None)
+            None, None, None, None)
+        

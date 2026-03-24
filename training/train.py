@@ -124,7 +124,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
     
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -135,7 +135,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             a_filt     = a_filt,
             z_pred     = z_pred,
             z_filt     = z_filt,
-            P_pred     = P_pred,
+            S_pred     = S_pred,
             P_filt     = P_filt,
             R          = R,
             Q          = Q,
@@ -173,7 +173,7 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
     
-        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
+        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -184,7 +184,7 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
             a_filt     = None,
             z_pred     = None,
             z_filt     = None,
-            P_pred     = None,
+            S_pred     = None,
             P_filt     = None,
             R          = None,
             Q          = None,
@@ -230,7 +230,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             current_mask = mask.expand(batch[0].shape[0], -1)
         else: current_mask = None
 
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
         _, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
@@ -240,7 +240,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask,device):
             a_filt     = a_filt,
             z_pred     = z_pred,
             z_filt     = z_filt,
-            P_pred     = P_pred,
+            S_pred     = S_pred,
             P_filt     = P_filt,
             R          = R,
             Q          = Q,
