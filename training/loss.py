@@ -100,7 +100,7 @@ def imm_supervision_loss(alpha_gru, alpha_imm):
         reduction='batchmean'
     )
 
-def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq, alpha_imm,
+def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq, alpha_imm,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
     """
     Computes ELBO loss:
@@ -148,6 +148,13 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
         return loss, terms
 
     if z_pred is not None and P_filt is not None:  # KVAE
+        L_recon_pred = F.binary_cross_entropy_with_logits(
+            x_dist_pred.logits[:, :-1, :, :],
+            ball_seq[:, 1:, :, :],
+            pos_weight=pos_weight,
+            reduction='none'
+        ).sum(dim=(2, 3)).mean()
+
         # log p(a | z) — innovation
         L_innov = innovation_loss(a_pred, a_seq, S_pred)
 
@@ -180,7 +187,7 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
         L_alpha =  diversity_loss(alpha_seq)
         L_imm = imm_supervision_loss(alpha_seq, alpha_imm)
 
-        loss = (tcfg.lambda_recon * L_recon +
+        loss = (tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
                 tcfg.lambda_innov * L_innov +
                 tcfg.lambda_posterior * L_posterior +
                 tcfg.lambda_prior * L_prior -

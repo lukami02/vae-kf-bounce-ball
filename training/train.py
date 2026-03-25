@@ -129,6 +129,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
+            x_dist_pred = x_dist_pred,
             a_dist     = a_dist,
             a_seq      = a_seq,
             a_pred     = a_pred,
@@ -179,6 +180,7 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
+            x_dist_pred = None,
             a_dist     = a_dist,
             a_seq      = a_seq,
             a_pred     = None,
@@ -236,6 +238,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
         _, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
+            x_dist_pred = x_dist_pred,
             a_dist     = a_dist,
             a_seq      = a_seq,
             a_pred     = a_pred,
