@@ -8,7 +8,7 @@ class TrainConfig:
     # Training
     epochs: int = 100
     vae_pretrain_epochs: int = 40
-    batch_size: int = 256
+    batch_size: int = 128
     learning_rate: float = 1e-3
     grad_clip: float = 1.0
     seed: int = 42
@@ -26,9 +26,9 @@ class TrainConfig:
     # Loss weights
     
     lambda_recon: float = 1.0      # reconstruction loss
-    lambda_innov: float = 2.0      # innovation loss
-    lambda_posterior: float = 0.1  # posterior loss
-    lambda_prior: float = 0.8      # prior loss
+    lambda_innov: float = 1.2      # innovation loss
+    lambda_posterior: float = 0.0  # posterior loss
+    lambda_prior: float = 0.5      # prior loss
     lambda_entropy: float = 0.1    # Entropy loss
     lambda_alpha: float = 0.0      # Alpha loss
     lambda_imm: float = 0.5

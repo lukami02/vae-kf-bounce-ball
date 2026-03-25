@@ -17,21 +17,21 @@ def kl_divergence_gaussian(mu_q, var_q, mu_p, var_p):
     kl = 0.5 * (torch.log(var_p / (var_q + 1e-8)) + var_q / (var_p + 1e-8) + (mu_q - mu_p) ** 2 / (var_p + 1e-8)- 1.0)
     return kl.sum(dim=-1)   # [B*T]
 
-def innovation_loss(a_pred, a_seq, S_pred):
+def innovation_loss(a_filt, a_seq, S_pred):
     """
     Stable innovation negative log-likelihood.
 
-    a_pred : [B, T, dim_a]        — predicted observation 
+    a_filt : [B, T, dim_a]        — predicted observation 
     a_seq  : [B, T, dim_a]        — true observation
     S_pred : [B, T, dim_a, dim_a] — innovation covariance (C P_pred C^T + R)
     """
 
-    B, T, dim_a = a_pred.shape
-    device = a_pred.device
+    B, T, dim_a = a_filt.shape
+    device = a_filt.device
 
-    mu = a_pred[:, :-1, :]         # [B, T-1, dim_a]
-    x  = a_seq[:, 1:, :]           # [B, T-1, dim_a]
-    S  = S_pred[:, :-1, :, :]      # [B, T-1, dim_a, dim_a]
+    mu = a_filt        # [B, T, dim_a]
+    x  = a_seq         # [B, T, dim_a]
+    S  = S_pred        # [B, T, dim_a, dim_a]
 
     mu = mu.reshape(-1, dim_a)
     x  = x.reshape(-1, dim_a)
@@ -156,7 +156,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         ).sum(dim=(2, 3)).mean()
 
         # log p(a | z) — innovation
-        L_innov = innovation_loss(a_pred, a_seq, S_pred)
+        L_innov = innovation_loss(a_filt, a_seq, S_pred)
 
         # log p(z | u) — state prior
         L_prior_z0 = - D.MultivariateNormal(
@@ -188,7 +188,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         L_imm = imm_supervision_loss(alpha_seq, alpha_imm)
 
         loss = (tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
-                tcfg.lambda_innov * L_innov +
+                tcfg.lambda_innov * L_innov -
                 tcfg.lambda_posterior * L_posterior +
                 tcfg.lambda_prior * L_prior -
                 tcfg.lambda_entropy * L_entropy +
