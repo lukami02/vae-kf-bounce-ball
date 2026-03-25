@@ -30,7 +30,8 @@ class TrainConfig:
     lambda_posterior: float = 0.1  # posterior loss
     lambda_prior: float = 0.4      # prior loss
     lambda_entropy: float = 0.1    # Entropy loss
-    lambda_alpha: float = 0.1      # Alpha loss
+    lambda_alpha: float = 0.0      # Alpha loss
+    lambda_imm: float = 0.5
 
     lambda_pred: float = 0.3       # prediction loss
     lambda_kl: float = 1           # KL divergence
@@ -44,6 +45,8 @@ class TrainConfig:
     free_running_steps: int = 15     # autoregressive rollout length
     free_running_warmup: int = 50
     p_mask: float = 0.1
+
+    imm_warmup_epochs: int  = 10
 
     # Logging
     log_every: int = 5
@@ -69,3 +72,9 @@ class TrainConfig:
         if epoch < self.free_running_warmup:
             return self.lambda_free * (epoch / self.free_running_warmup)
         return self.lambda_free
+    
+    def get_lambda_imm(self, epoch: int) -> float:
+        if epoch < self.imm_warmup_epochs:
+            return 0.0
+        ramp = min(1.0, (epoch - self.imm_warmup_epochs) / 20)
+        return self.lambda_imm * ramp

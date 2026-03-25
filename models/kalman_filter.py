@@ -87,12 +87,35 @@ class KalmanFilter(nn.Module):
         a_filt_list = []
         a_pred_list = []
         alpha_list  = []
+        alpha_imm_list = []
         S_list      = []
 
         for k in range(T):
             a_k    = a_seq[:, k, :]                                           # [B, dim_a]
             mask_k = mask[:, k].unsqueeze(-1)                                 # [B, 1]
             u_k    = u_seq[:, k, :] if u_seq is not None else None
+
+            has_obs = mask_k.squeeze(-1) 
+
+            log_likelihoods = []
+            for j in range(self.cfg.num_matrices):
+                C_j = C_matrices[j].unsqueeze(0).expand(B, -1, -1)
+                a_pred_j = torch.bmm(C_j, z.unsqueeze(-1)).squeeze(-1)
+                r_j = a_k - a_pred_j
+                S_j = torch.bmm(C_j, torch.bmm(P, C_j.transpose(1, 2))) \
+                    + self.R.unsqueeze(0).expand(B, -1, -1)
+                S_j = 0.5 * (S_j + S_j.transpose(-1, -2)) \
+                    + 1e-4 * torch.eye(S_j.shape[-1], device=device).unsqueeze(0)
+                dist_j = D.MultivariateNormal(
+                    torch.zeros_like(r_j),
+                    scale_tril=torch.linalg.cholesky(S_j)
+                )
+                log_likelihoods.append(dist_j.log_prob(r_j))
+
+            log_likelihoods = torch.stack(log_likelihoods, dim=-1)   # [B, K]
+            alpha_imm = torch.softmax(log_likelihoods, dim=-1)        # [B, K]
+            alpha_imm = alpha_imm * has_obs.unsqueeze(-1).float()
+            alpha_imm_list.append(alpha_imm)
 
             # Compose matrices
             w   = alpha_k.unsqueeze(-1).unsqueeze(-1)                         # [B, K, 1, 1]
@@ -183,6 +206,7 @@ class KalmanFilter(nn.Module):
         a_filt    = torch.stack(a_filt_list, dim=1)   # [B, T, dim_a]
         a_pred    = torch.stack(a_pred_list, dim=1)   # [B, T, dim_a]
         alpha_seq = torch.stack(alpha_list,  dim=1)   # [B, T, K]
+        alpha_imm = torch.stack(alpha_imm_list, dim=1)# [B, T, K]
         S_pred    = torch.stack(S_list,  dim=1)       # [B, T, dim_a, dim_a]
 
-        return z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, self.R, self.Q
+        return z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, alpha_imm, self.R, self.Q

@@ -90,11 +90,11 @@ class KVAE(BaseVAE):
                 x_dist_filt, None,
                 a_dist, a_seq, None, None,
                 None, None, None, None,
-                None, None, None, None
+                None, None, None, None, None
             )
         
         # Kalman filter
-        z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, R, Q = self.kalman(
+        z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, alpha_imm, R, Q = self.kalman(
             a_seq       = a_seq,
             alpha_net   = self.alpha_net,
             h_obs       = h_obs,
@@ -114,7 +114,7 @@ class KVAE(BaseVAE):
             x_dist_filt, x_dist_pred,
             a_dist, a_seq, a_filt, a_pred,
             z_filt, P_filt, z_pred, P_pred,
-            S_pred, alpha_seq, R, Q
+            S_pred, alpha_seq, alpha_imm, R, Q
         )
 
 

@@ -59,11 +59,7 @@ class AlphaNetwork(nn.Module):
         state = self.gru(inputs, state)
         logits = self.fc_alpha(state)
 
-        # Gumbel-Softmax 
-        if self.training:
-            alpha = nn.functional.gumbel_softmax(logits, tau=temp, hard=False)
-        else:
-            alpha = nn.functional.softmax(logits / temp, dim=-1)
+        alpha = torch.softmax(logits / temp, dim=-1)
             
         return alpha, state
     

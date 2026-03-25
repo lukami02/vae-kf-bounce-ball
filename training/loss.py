@@ -80,7 +80,27 @@ def diversity_loss(alpha_batch):
     
     return H_max - H
 
-def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq,
+def imm_supervision_loss(alpha_gru, alpha_imm):
+    """
+    KL(alpha_imm || alpha_gru)
+    alpha_gru: [B, T, K]
+    alpha_imm: [B, T, K]
+    """
+    valid = alpha_imm.sum(-1) > 0.5                                      # [B, T]
+
+    if valid.sum() == 0:
+        return torch.tensor(0.0, device=alpha_gru.device)
+
+    gru_valid = alpha_gru[valid]                                          # [N, K]
+    imm_valid = alpha_imm[valid].detach()                                 # [N, K]
+
+    return F.kl_div(
+        torch.log(gru_valid + 1e-8),
+        imm_valid,
+        reduction='batchmean'
+    )
+
+def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq, alpha_imm,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
     """
     Computes ELBO loss:
@@ -158,13 +178,15 @@ def compute_loss( ball_seq, x_dist_filt, a_dist, a_seq, a_pred, a_filt, z_pred, 
 
         # alpha entropy
         L_alpha =  diversity_loss(alpha_seq)
+        L_imm = imm_supervision_loss(alpha_seq, alpha_imm)
 
         loss = (tcfg.lambda_recon * L_recon +
                 tcfg.lambda_innov * L_innov +
                 tcfg.lambda_posterior * L_posterior +
                 tcfg.lambda_prior * L_prior -
                 tcfg.lambda_entropy * L_entropy +
-                tcfg.lambda_alpha * L_alpha
+                tcfg.lambda_alpha * L_alpha + 
+                tcfg.get_lambda_imm(epoch) * L_imm
         )
 
         terms = {
