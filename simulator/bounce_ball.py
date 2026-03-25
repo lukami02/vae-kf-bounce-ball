@@ -60,7 +60,6 @@ class BouncingBallSim:
             if pos[0] < self.r:
                 pos[0] = self.r
                 vel[0] *= -1
-
             if pos[0] > self.W - self.r:
                 pos[0] = self.W - self.r
                 vel[0] *= -1
@@ -68,7 +67,6 @@ class BouncingBallSim:
             if pos[1] < self.r:
                 pos[1] = self.r
                 vel[1] *= -1
-
             if pos[1] > self.H - self.r:
                 pos[1] = self.H - self.r
                 vel[1] *= -1
@@ -80,18 +78,19 @@ class BouncingBallSim:
 
                 dx = pos[0] - cx
                 dy = pos[1] - cy
-                dist_sq = dx*dx + dy*dy
 
-                if dist_sq < self.r*self.r:
-                    dist = np.sqrt(dist_sq) + 1e-6
-                    nx = dx / dist
-                    ny = dy / dist
-                    penetration = self.r - dist
-                    pos[0] += nx * penetration
-                    pos[1] += ny * penetration
+                if dx*dx + dy*dy < self.r*self.r:
+                    pen_x = self.r - abs(dx)
+                    pen_y = self.r - abs(dy)
 
-                    vel -= 2 * np.dot(vel, [nx,ny]) * np.array([nx,ny])
-
+                    if pen_x < pen_y:
+                        vel[0] *= -1
+                        if dx > 0: pos[0] = cx + self.r
+                        else: pos[0] = cx - self.r
+                    else:
+                        vel[1] *= -1
+                        if dy > 0: pos[1] = cy + self.r
+                        else: pos[1] = cy - self.r
         return pos, vel
 
     def render_obstacles(self):
@@ -132,7 +131,7 @@ class BouncingBallSim:
 
             img[y_min:y_max,x_min:x_max] = g
         else:
-            r = 3*self.r
+            r = 1.5*self.r
             cv2.circle(img, center=(int(x0), int(y0)), radius=int(r), color=1.0, thickness=-1)
         return img
     
