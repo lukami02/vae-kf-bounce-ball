@@ -23,13 +23,13 @@ class VAEConfig:
     QR_reg: float = 1e-3                   # diagonal regularization added to Q and R for numerical stability
 
     # encoder architecture
-    encoder_ball_channels: list = field(default_factory=lambda: [32, 32, 32] )    # filters for moving ball CNN
+    encoder_ball_channels: list = field(default_factory=lambda: [32, 64] )    # filters for moving ball CNN
     encoder_obstacle_channels: list = field(default_factory=lambda: [32, 32, 32]) # filters for static obstacle CNN
     dim_obstacle: int = 16                          # latent size for obstacle features
     enc_activation: type = nn.ELU                   # activation class for encoder layers
 
     # decoder architecture
-    decoder_channels: list = field(default_factory=lambda: [32, 32, 32])         # filters for moving ball CNN
+    decoder_channels: list = field(default_factory=lambda: [64, 32])         # filters for moving ball CNN
     dec_activation: type = nn.ELU                   # activation class for decoder layers
 
     # alpha network

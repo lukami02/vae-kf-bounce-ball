@@ -25,6 +25,7 @@ class BallEncoder(nn.Module):
         for i in range(len(channels) - 1):
             layers += [
                 nn.Conv2d(channels[i], channels[i + 1], 3, stride=2, padding=1),
+                nn.BatchNorm2d(channels[i+1]),
                 vae_cfg.enc_activation(),
             ]
 
@@ -82,6 +83,7 @@ class ObstacleEncoder(nn.Module):
         for i in range(len(channels)-1):
             layers += [
                 nn.Conv2d(channels[i], channels[i+1], 3, stride=2, padding=1), 
+                nn.BatchNorm2d(channels[i+1]),
                 vae_cfg.enc_activation()
             ]
         self.cnn = nn.Sequential(*layers)

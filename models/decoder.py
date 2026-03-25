@@ -35,6 +35,7 @@ class BallDecoder(nn.Module):
             layers.append(nn.ConvTranspose2d(in_ch, out_ch, kernel_size=4, stride=2, padding=1))
 
             if i < len(channels) - 1:
+                layers.append(nn.BatchNorm2d(out_ch),)
                 layers.append(vae_cfg.dec_activation())
 
         self.upsample = nn.Sequential(*layers)
