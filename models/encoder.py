@@ -19,15 +19,14 @@ class BallEncoder(nn.Module):
         self.cfg = vae_cfg
 
         # input channels
-        channels = [2] + vae_cfg.encoder_ball_channels
+        channels = [1] + vae_cfg.encoder_ball_channels
 
         layers = []
         for i in range(len(channels) - 1):
             layers += [
-                nn.Conv2d(channels[i], channels[i + 1], 3, stride=1, padding=1),
+                nn.Conv2d(channels[i], channels[i + 1], 3, stride=2, padding=1),
                 nn.BatchNorm2d(channels[i + 1]),
                 vae_cfg.enc_activation(),
-                nn.MaxPool2d(2, 2)
             ]
 
         self.cnn = nn.Sequential(*layers)
@@ -39,7 +38,7 @@ class BallEncoder(nn.Module):
         self.fc_var = nn.Linear(self._flat_size, vae_cfg.dim_a)
 
     def _get_flat_size(self, image_size):
-        dummy = torch.zeros(1, 2, image_size[0], image_size[1])
+        dummy = torch.zeros(1, 1, image_size[0], image_size[1])
         out = self.cnn(dummy)
         return out.view(1, -1).shape[1]
 
@@ -50,19 +49,16 @@ class BallEncoder(nn.Module):
             return mu + eps * std
         return mu
 
-    def forward(self, x, obs_img):
+    def forward(self, x):
         """
         x: [B, T, H, W]
         obs_img: [B, 1, H, W]
         """
         B, T, H, W = x.shape
 
-        obs_seq = obs_img.unsqueeze(1).expand(-1, T, -1, -1, -1)  # [B,T,1,H,W]
-
         # add channel dim to x
         x = x.unsqueeze(2)                  # [B,T,1,H,W]
-        x = torch.cat([x, obs_seq], dim=2)  # [B,T,2,H,W]
-        x_flat = x.view(B * T, 2, H, W)
+        x_flat = x.view(B * T, 1, H, W)
         enc = self.cnn(x_flat)
         enc = enc.view(B * T, -1)
 
@@ -85,9 +81,9 @@ class ObstacleEncoder(nn.Module):
             layers += [
                 nn.Conv2d(channels[i], channels[i + 1], 3, stride=1, padding=1),
                 nn.BatchNorm2d(channels[i + 1]),
-                vae_cfg.enc_activation(),
-                nn.MaxPool2d(2, 2)
+                #vae_cfg.enc_activation(),
             ]
+        layers.append(nn.AdaptiveAvgPool2d((6, 6)))
         self.cnn = nn.Sequential(*layers)
         
         self.feature_proj = nn.Conv2d(vae_cfg.encoder_obstacle_channels[-1], vae_cfg.alpha_units, 1)

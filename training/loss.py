@@ -72,6 +72,7 @@ def transition_loss(z_seq, z_pred, Q):
     return (mahal + log_det).mean()
 
 def diversity_loss(alpha_batch):
+    return -torch.log(alpha_batch.max(-1)[0]).mean()
     # alpha_batch: [B, T, K]
     avg_usage = alpha_batch.mean(dim=[0, 1])  
     
@@ -178,6 +179,10 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         P_filt_reg = P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
         P_filt_reg = P_filt_reg + cfg.QR_reg * torch.eye(dim_z, device=device).unsqueeze(0)
 
+        eigvals = torch.linalg.eigvalsh(P_filt_reg)
+        if (eigvals < 0).any():
+            P_filt_reg = P_filt_reg + (eigvals.min().abs() + 1e-4) * torch.eye(dim_z, device=device).unsqueeze(0)
+
         L_posterior = - D.MultivariateNormal(
             z_filt[:, 1:, :].reshape(-1, dim_z),
             P_filt_reg
@@ -187,13 +192,19 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         L_alpha =  diversity_loss(alpha_seq)
         L_imm = imm_supervision_loss(alpha_seq, alpha_imm)
 
-        loss = (tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
-                tcfg.lambda_innov * L_innov -
-                tcfg.lambda_posterior * L_posterior +
+        # R regularization
+        R_min_var = 0.015 
+        R_penalty = F.relu(R_min_var - torch.diag(R)).mean()  # Penalty za mali diag(R)
+        L_R_reg = 20 * R_penalty 
+
+        loss = (0.3 * tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
+                tcfg.lambda_innov * L_innov +
                 tcfg.lambda_prior * L_prior -
-                tcfg.lambda_entropy * L_entropy +
+                tcfg.lambda_entropy * L_entropy  +
+                tcfg.lambda_posterior * L_posterior +
                 tcfg.lambda_alpha * L_alpha + 
-                tcfg.get_lambda_imm(epoch) * L_imm
+                tcfg.get_lambda_imm(epoch) * L_imm +
+                L_R_reg
         )
 
         terms = {

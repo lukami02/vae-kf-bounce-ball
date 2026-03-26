@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 import sys
 sys.path.append("..")
@@ -21,7 +22,7 @@ class AlphaNetwork(nn.Module):
         self.value_layer = nn.Linear(cfg.alpha_units, cfg.alpha_units)
 
         self.var_proj = nn.Sequential(
-            nn.Linear(cfg.dim_a + cfg.dim_z, cfg.alpha_units),
+            nn.Linear(cfg.dim_a + cfg.dim_z + cfg.num_matrices * cfg.dim_a, cfg.alpha_units),
             nn.Tanh()
         )
 
@@ -33,7 +34,7 @@ class AlphaNetwork(nn.Module):
             nn.Linear(cfg.alpha_units // 2, cfg.num_matrices)
         )
 
-    def forward(self, a_k, h_obs_features, z_filt, state=None, u_k=None, temp=0.1):
+    def forward(self, a_k, h_obs_features, z_filt, state=None, u_k=None, temp=1, a_next_all=None):
         # h_obs_features [B, N, alpha_units] 
 
         if self.cfg.num_matrices == 1:
@@ -50,7 +51,7 @@ class AlphaNetwork(nn.Module):
         attn_weights = torch.softmax(scores, dim=-1)    # [B, 1, N]
         context = torch.bmm(attn_weights, V).squeeze(1) # [B, alpha_units]
 
-        var_input = self.var_proj(torch.cat([a_k, z_filt], dim=-1))
+        var_input = self.var_proj(torch.cat([a_k, z_filt, a_next_all], dim=-1))
         inputs = torch.cat([var_input, context], dim=-1)
         
         if self.cfg.dim_u > 0 and u_k is not None:
@@ -59,7 +60,13 @@ class AlphaNetwork(nn.Module):
         state = self.gru(inputs, state)
         logits = self.fc_alpha(state)
 
-        alpha = torch.softmax(logits / temp, dim=-1)
+        if self.training:
+            alpha = F.gumbel_softmax(logits, tau=temp, hard=False, dim=-1) 
+        else:
+            alpha = torch.nn.functional.one_hot(
+                torch.argmax(logits, dim=-1),
+                num_classes=logits.size(-1)
+            ).float()
             
         return alpha, state
     

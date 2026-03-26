@@ -50,13 +50,13 @@ class KVAE(BaseVAE):
         A[1] = A[0].clone()
         quarter = max(1, half // 2)
         for i in range(quarter):
-            A[1, i + half, i + half] = -0.9 
+            A[1, i + half, i + half] = - dt
 
         # Mode 2
         if K > 2:
             A[2] = A[0].clone()
             for i in range(quarter, half):
-                A[2, i + half, i + half] = -0.9
+                A[2, i + half, i + half] = - dt
 
         for k in range(3, K):
             A[k] = A[0].clone()
@@ -76,7 +76,7 @@ class KVAE(BaseVAE):
         B, T, H, W = ball_seq.shape
 
         # Encode
-        a_dist = self.ball_encoder(ball_seq, obstacle_img.unsqueeze(1)) # a_seq: [B, T, dim_a]
+        a_dist = self.ball_encoder(ball_seq)                            # a_seq: [B, T, dim_a]
         h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))        # [B, dim_obstacle]
 
         if self.training:
@@ -103,7 +103,7 @@ class KVAE(BaseVAE):
             B_matrices  = self.B_matrices,
             u_seq       = u_seq,
             mask        = mask,
-            temp        = self.cfg.get_temperature(epoch)
+            epoch       = epoch
         )
 
         # Decode
