@@ -53,14 +53,14 @@ def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.
 
     return logger
     
-def get_optimizer(model, tcfg: TrainConfig):
+def get_optimizer(model, tcfg: TrainConfig, phase=0):
     if isinstance(model, KVAE):
         param_groups = [
-            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate},
+            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate if phase==0 else 0.2*tcfg.learning_rate},
             {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
-            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate},
-            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate * 0.3},
-            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.3},
+            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate if phase==0 else 0.1*tcfg.learning_rate},
+            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
+            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.4},
             {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.1},
             {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.1},
         ]
@@ -326,6 +326,7 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                     f"loss={pretrain_terms['loss']:.4f}  ")
 
     unfreeze_all(model)
+    optimizer = get_optimizer(model, tcfg, phase=1)
     scheduler = get_scheduler(optimizer, tcfg)
     
     logger.info("=" * 60)
