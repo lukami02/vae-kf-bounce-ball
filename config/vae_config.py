@@ -36,6 +36,6 @@ class VAEConfig:
     alpha_units: int = 32                  # hidden units in alpha network
 
     def get_temperature(self, epoch: int) -> float:
-        temp = max(0.1, 1.0 * (0.95 ** epoch))
+        temp = max(0.1, 1.0 * (0.99 ** epoch))
         return temp
     

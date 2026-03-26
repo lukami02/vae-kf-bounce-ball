@@ -10,28 +10,28 @@ class TrainConfig:
     vae_pretrain_epochs: int = 40
     batch_size: int = 128
     learning_rate: float = 1e-3
-    grad_clip: float = 1.0
-    seed: int = 42
+    grad_clip: float = 1.2
+    seed: int = 12
     val_split:  float = 0.1    
     test_split: float = 0.01
-    pos_weight: float = 5.0      # binary cross entropy positive class weight
+    pos_weight: float = 6.5      # binary cross entropy positive class weight
 
     # Optimizer
     optimizer: str   = "adamw"     
-    weight_decay: float = 1e-4       
+    weight_decay: float = 1e-5       
     lr_scheduler: str = "cosine" 
-    lr_step_size: int = 50 
+    lr_step_size: int = 5 
     lr_gamma: float = 0.5       
 
     # Loss weights
     
     lambda_recon: float = 1.0      # reconstruction loss
-    lambda_innov: float = 1.2      # innovation loss
-    lambda_posterior: float = 0.0  # posterior loss
-    lambda_prior: float = 0.5      # prior loss
-    lambda_entropy: float = 0.1    # Entropy loss
-    lambda_alpha: float = 0.0      # Alpha loss
-    lambda_imm: float = 0.5
+    lambda_innov: float = 1.8      # innovation loss
+    lambda_posterior: float = 0.1  # posterior loss
+    lambda_prior: float = 0.7      # prior loss
+    lambda_entropy: float = 0.3    # Entropy loss
+    lambda_alpha: float = 0.15     # Alpha loss
+    lambda_imm: float = 0.7
 
     lambda_pred: float = 0.3       # prediction loss
     lambda_kl: float = 1           # KL divergence
@@ -43,7 +43,7 @@ class TrainConfig:
 
     # Free-running training
     free_running_steps: int = 15     # autoregressive rollout length
-    free_running_warmup: int = 50
+    free_running_warmup: int = 40
     p_mask: float = 0.1
 
     imm_warmup_epochs: int  = 10

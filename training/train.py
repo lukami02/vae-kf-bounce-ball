@@ -59,8 +59,8 @@ def get_optimizer(model, tcfg: TrainConfig):
             {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate},
             {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
             {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate},
-            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate * 0.3},
-            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.3},
+            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
+            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.4},
             {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.1},
             {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.1},
         ]
