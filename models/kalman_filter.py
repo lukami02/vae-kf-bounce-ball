@@ -78,7 +78,7 @@ class KalmanFilter(nn.Module):
         # init alpha
         a_prev = (a_seq[:, 0, :] - (a_seq[:, 1, :] - a_seq[:, 0, :])).detach()   # [B, dim_a]
         gru_state = alpha_net.init_state(B, device)
-        alpha_k, gru_state = alpha_net(a_prev, h_obs, z.detach(), gru_state, temp=self.cfg.get_temperature(epoch))
+        alpha_k, gru_state = alpha_net(a_prev, h_obs, z.detach(), gru_state, temp=self.cfg.get_temperature(100))
 
         z_filt_list = []
         P_filt_list = []
@@ -112,7 +112,7 @@ class KalmanFilter(nn.Module):
 
             log_likelihoods = torch.stack(log_likelihoods, dim=-1)   # [B, K]
             logits_imm = log_likelihoods - log_likelihoods.logsumexp(dim=-1, keepdim=True)
-            alpha_imm = torch.softmax(logits_imm / self.cfg.get_temperature(epoch), dim=-1)
+            alpha_imm = torch.softmax(logits_imm / self.cfg.get_temperature(100), dim=-1)
             has_obs = mask_k.squeeze(-1)  # [B]
             alpha_imm = alpha_imm * has_obs.unsqueeze(-1).float()
             alpha_imm_list.append(alpha_imm)
@@ -153,7 +153,7 @@ class KalmanFilter(nn.Module):
                 a_filt_k = torch.bmm(C_k, z_filt.unsqueeze(-1)).squeeze(-1)
             """
 
-            p_true = max(0.0, 1.0 - epoch / 20)
+            p_true = 0
 
             use_true = (torch.rand(B, device=device) < p_true).unsqueeze(-1)  # [B, 1]
 
@@ -164,7 +164,7 @@ class KalmanFilter(nn.Module):
 
             # Update alpha
             a_for_alpha = a_filt_k                                            # [B, dim_a]
-            alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, z_filt, gru_state, temp=self.cfg.get_temperature(epoch))
+            alpha_k, gru_state = alpha_net(a_for_alpha, h_obs, z_filt, gru_state, temp=self.cfg.get_temperature(100))
             alpha_list.append(alpha_k)
 
             w   = alpha_k.unsqueeze(-1).unsqueeze(-1)

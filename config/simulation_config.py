@@ -6,7 +6,7 @@ class SimulationConfig:
     size: tuple[int, int] = (32, 32)       # (H, W)
     gravity: bool = False                  # enable gravity
     seed: int = 12                         # RNG seed
-    T: int = 60                            # number of frames per episode
+    T: int = 6                            # number of frames per episode
     substeps: int = 4                      # number of physics substeps per frame
     episodes: int = 8192                   # number of episodes to generate
     data_dir:  str = "dataset/"            # directory to save generated .npy files

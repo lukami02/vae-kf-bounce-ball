@@ -298,6 +298,7 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     optimizer = get_optimizer(model, tcfg)
     scheduler = get_scheduler(optimizer, tcfg)
 
+
     logger.info("=" * 60)
     logger.info("Starting training")
     logger.info(f"Device:     {device}")
@@ -328,6 +329,12 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     unfreeze_all(model)
     scheduler = get_scheduler(optimizer, tcfg)
     
+    for param in model.decoder.parameters():
+        param.requires_grad = False
+
+    for param in model.ball_encoder.parameters():
+        param.requires_grad = False
+
     logger.info("=" * 60)
     logger.info("Phase 2: Full training")
     logger.info("=" * 60)
@@ -335,10 +342,7 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     for epoch in range(1, tcfg.epochs + 1):
         B = tcfg.batch_size
         T = sim_cfg.T
-        if epoch >= tcfg.free_running_warmup:
-            mask = make_mask(B, T, device, tcfg.free_running_steps, tcfg.p_mask, randomize_start=True)
-        else:
-            mask = make_mask(B, T, device, int(tcfg.free_running_steps * epoch / tcfg.free_running_warmup), tcfg.p_mask, randomize_start=True)
+        mask = make_mask(B, T, device, tcfg.free_running_steps, tcfg.p_mask, randomize_start=True)
 
         mask_val = make_mask(B, T, device, tcfg.free_running_steps, p_mask=0.0, randomize_start=False)
 

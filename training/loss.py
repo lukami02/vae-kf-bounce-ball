@@ -122,15 +122,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
     B, T, dim_z = z_filt.shape if z_filt is not None else (*a_seq.shape[:2], 0)
     device = ball_seq.device
 
-    # log p(x | a) — reconstruction
-    logits = x_dist_filt.logits
-    pos_weight = torch.tensor(tcfg.pos_weight, device=device)
-    L_recon = F.binary_cross_entropy_with_logits(
-        logits,
-        ball_seq,
-        pos_weight=pos_weight,
-        reduction='none'
-    ).sum(dim=(2, 3)).mean()
+    L_recon = torch.tensor(0, device=device)
 
     if phase == 0:
         # KL(q(a|x) || N(0,I)) — encoder regularization
@@ -148,13 +140,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         return loss, terms
 
     if z_pred is not None and P_filt is not None:  # KVAE
-        L_recon_pred = F.binary_cross_entropy_with_logits(
-            x_dist_pred.logits[:, :-1, :, :],
-            ball_seq[:, 1:, :, :],
-            pos_weight=pos_weight,
-            reduction='none'
-        ).sum(dim=(2, 3)).mean()
-
+        L_recon_pred = torch.tensor(0, device=device)
         # log p(a | z) — innovation
         L_innov = innovation_loss(a_filt, a_seq, S_pred)
 
@@ -193,7 +179,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
 
         # R regularization
         R_min_var = 0.015 
-        R_penalty = F.relu(R_min_var - torch.diag(R)).mean()  # Penalty za mali diag(R)
+        R_penalty = F.relu(R_min_var - torch.diag(R)).mean() 
         L_R_reg = 10 * R_penalty 
 
         loss = (tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
