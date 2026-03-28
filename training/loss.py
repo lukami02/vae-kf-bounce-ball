@@ -87,19 +87,17 @@ def imm_supervision_loss(alpha_gru, alpha_imm):
     alpha_gru: [B, T, K]
     alpha_imm: [B, T, K]
     """
-    valid = alpha_imm.sum(-1) > 0.5                                      # [B, T]
+    B, T, K = alpha_gru.shape
 
-    if valid.sum() == 0:
-        return torch.tensor(0.0, device=alpha_gru.device)
+    targets = alpha_imm.argmax(dim=-1)  # [B, T] 
 
-    gru_valid = alpha_gru[valid]                                          # [N, K]
-    imm_valid = alpha_imm[valid].detach()                                 # [N, K]
-
-    return F.kl_div(
-        torch.log(gru_valid + 1e-8),
-        imm_valid,
-        reduction='batchmean'
+    # Cross-entropy
+    loss = F.cross_entropy(
+        alpha_gru.reshape(B * T, K),
+        targets.reshape(B * T),
+        reduction='mean'
     )
+    return loss
 
 def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq, alpha_imm,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):

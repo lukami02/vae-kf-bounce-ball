@@ -113,11 +113,11 @@ class KalmanFilter(nn.Module):
             a_next_all = torch.cat(a_next_per_expert, dim=-1)  # [B, K * dim_a]
 
             log_likelihoods = torch.stack(log_likelihoods, dim=-1)  # [B, K]
-            logits_imm = log_likelihoods - log_likelihoods.logsumexp(dim=-1, keepdim=True)
-            alpha_imm  = torch.softmax(logits_imm / self.cfg.get_temperature(epoch), dim=-1)
+            best_idx = torch.argmax(log_likelihoods, dim=-1) 
+            alpha_imm = torch.nn.functional.one_hot(best_idx, num_classes=self.cfg.num_matrices).float()  
 
-            has_obs   = mask_k.squeeze(-1)  # [B]
-            alpha_imm = alpha_imm * has_obs.unsqueeze(-1).float()
+            #has_obs   = mask_k.squeeze(-1)  # [B]
+            #alpha_imm = alpha_imm * has_obs.unsqueeze(-1).float()
             
             a_prev = torch.bmm(C_k_prev, z_prev.unsqueeze(-1)).squeeze(-1).detach()
 
@@ -131,7 +131,11 @@ class KalmanFilter(nn.Module):
             alpha_imm_list.append(alpha_imm)
 
             # Compose matrices
-            w = alpha_k.unsqueeze(-1).unsqueeze(-1)                           # [B, K, 1, 1]
+            if self.train and epoch < 80:
+                w = alpha_imm.unsqueeze(-1).unsqueeze(-1)
+            else:
+                w = alpha_k.unsqueeze(-1).unsqueeze(-1)                           # [B, K, 1, 1]
+
             A_k = (w * A_matrices.unsqueeze(0)).sum(dim=1)                    # [B, dim_z, dim_z]
             C_k = (w * C_matrices.unsqueeze(0)).sum(dim=1)                    # [B, dim_a, dim_z]
 

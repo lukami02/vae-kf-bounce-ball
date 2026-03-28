@@ -7,10 +7,10 @@ class TrainConfig:
 
     # Training
     epochs: int = 100
-    vae_pretrain_epochs: int = 50
+    vae_pretrain_epochs: int = 0
     batch_size: int = 256
-    learning_rate: float = 1e-3
-    grad_clip: float = 1.2
+    learning_rate: float = 2e-3
+    grad_clip: float = 5
     seed: int = 12
     val_split:  float = 0.1    
     test_split: float = 0.01
@@ -26,12 +26,12 @@ class TrainConfig:
     # Loss weights
     
     lambda_recon: float = 1.0      # reconstruction loss
-    lambda_innov: float = 1.8      # innovation loss
-    lambda_posterior: float = 0.1  # posterior loss
-    lambda_prior: float = 0.7      # prior loss
-    lambda_entropy: float = 0.3    # Entropy loss
-    lambda_alpha: float = 0.15     # Alpha loss
-    lambda_imm: float = 0.7
+    lambda_innov: float = 2        # innovation loss
+    lambda_posterior: float = 0.3  # posterior loss
+    lambda_prior: float = 1        # prior loss
+    lambda_entropy: float = 0.5    # Entropy loss
+    lambda_alpha: float = 0.3     # Alpha loss
+    lambda_imm: float = 4
 
     lambda_pred: float = 0.3       # prediction loss
     lambda_kl: float = 1           # KL divergence
@@ -42,9 +42,9 @@ class TrainConfig:
     kl_warmup_epochs: int = 10  
 
     # Free-running training
-    free_running_steps: int = 10     # autoregressive rollout length
-    free_running_warmup: int = 50
-    p_mask: float = 0.1
+    free_running_steps: int = 0     # autoregressive rollout length
+    free_running_warmup: int = 30
+    p_mask: float = 0.5
 
     imm_warmup_epochs: int  = 10
 
@@ -76,5 +76,5 @@ class TrainConfig:
     def get_lambda_imm(self, epoch: int) -> float:
         if epoch < self.imm_warmup_epochs:
             return 0.0
-        ramp = min(1.0, (epoch - self.imm_warmup_epochs) / 20)
+        ramp = min(1.0, (epoch - self.imm_warmup_epochs) / 10)
         return self.lambda_imm * ramp

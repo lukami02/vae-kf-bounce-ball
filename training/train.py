@@ -61,8 +61,8 @@ def get_optimizer(model, tcfg: TrainConfig, phase=0):
             {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate if phase==0 else 0.1*tcfg.learning_rate},
             {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
             {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.4},
-            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.1},
-            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.1},
+            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.2},
+            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.2},
         ]
         if model.B_matrices is not None:
             param_groups.append(
@@ -311,6 +311,7 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     
     if isinstance(model, KVAE):
         freeze_kalman(model)
+
     logger.info("=" * 60)
     logger.info("Starting training")
     logger.info(f"Phase 1: VAE pretraining for {tcfg.vae_pretrain_epochs} epochs")
@@ -326,7 +327,7 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                     f"loss={pretrain_terms['loss']:.4f}  ")
 
     unfreeze_all(model)
-    optimizer = get_optimizer(model, tcfg, phase=1)
+    optimizer = get_optimizer(model, tcfg)
     scheduler = get_scheduler(optimizer, tcfg)
     
     logger.info("=" * 60)
@@ -336,12 +337,12 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     for epoch in range(1, tcfg.epochs + 1):
         B = tcfg.batch_size
         T = sim_cfg.T
-        if epoch >= tcfg.free_running_warmup:
-            mask = make_mask(B, T, device, tcfg.free_running_steps, tcfg.p_mask, randomize_start=True)
+        if epoch >= tcfg.free_running_warmup + 20:
+            mask = make_mask(B, T, device, 0, tcfg.p_mask, randomize_start=True)
         else:
-            mask = make_mask(B, T, device, int(tcfg.free_running_steps * epoch / tcfg.free_running_warmup), tcfg.p_mask, randomize_start=True)
+            mask = make_mask(B, T, device, 0, tcfg.p_mask* (max((epoch - 20),0)/tcfg.free_running_warmup), randomize_start=True)
 
-        mask_val = make_mask(B, T, device, tcfg.free_running_steps, p_mask=0.0, randomize_start=False)
+        mask_val = make_mask(B, T, device, 10, p_mask=0.0, randomize_start=False)
 
         train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
         val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
