@@ -6,18 +6,7 @@ from config.train_config import TrainConfig
 from config.vae_config import VAEConfig
 
 
-def kl_divergence_gaussian(mu_q, var_q, mu_p, var_p):
-    """
-    Closed-form KL divergence between two diagonal Gaussians.
-    KL(q || p) = 0.5 * sum(log(var_p/var_q) + var_q/var_p + (mu_q - mu_p)^2 / var_p - 1)
-
-    mu_q, var_q:  [B*T, dim_a]  — VAE posterior (encoder output)
-    mu_p, var_p:  [B*T, dim_a]  — Kalman prior (C @ z_pred)
-    """
-    kl = 0.5 * (torch.log(var_p / (var_q + 1e-8)) + var_q / (var_p + 1e-8) + (mu_q - mu_p) ** 2 / (var_p + 1e-8)- 1.0)
-    return kl.sum(dim=-1)   # [B*T]
-
-def innovation_loss(a_filt, a_seq, S_pred):
+def innovation_loss(a_filt, a_seq, S_pred, mask):
     """
     Stable innovation negative log-likelihood.
 
@@ -29,80 +18,30 @@ def innovation_loss(a_filt, a_seq, S_pred):
     B, T, dim_a = a_filt.shape
     device = a_filt.device
 
-    mu = a_filt        # [B, T, dim_a]
-    x  = a_seq         # [B, T, dim_a]
-    S  = S_pred        # [B, T, dim_a, dim_a]
+    mu = a_filt[:, :-1, :]        # [B, T, dim_a]
+    x  = a_seq[:, 1:, :]         # [B, T, dim_a]
+    S  = S_pred[:, :-1, :, :]    # [B, T-1, dim_a, dim_a]
 
     mu = mu.reshape(-1, dim_a)
     x  = x.reshape(-1, dim_a)
     S  = S.reshape(-1, dim_a, dim_a)
 
-    I = torch.eye(dim_a, device=device).unsqueeze(0)
+    mask_flat = mask[:, 1:].reshape(-1)
 
-    S = 0.5 * (S + S.transpose(-1, -2))     # enforce symmetry
-    S = S + 1e-6 * I                        # jitter
-
+    S = S + 1e-4 * torch.eye(dim_a, device=S.device).unsqueeze(0)
     L = torch.linalg.cholesky(S)
 
     dist = D.MultivariateNormal(mu, scale_tril=L)
+    log_prob = dist.log_prob(x)      # [B*T]
+    log_prob = log_prob * mask_flat
 
-    return -dist.log_prob(x).mean()
+    return - log_prob.sum() / mask_flat.sum()
 
-def transition_loss(z_seq, z_pred, Q):
-    """
-    Negative log-likelihood of Kalman state transitions.
 
-    z_seq : [B, T, dim_z]
-    z_pred : [B, T, dim_z, dim_z]
-    Q     : [dim_z, dim_z]
-    """
-    B, T, dim_z = z_seq.shape
-    r = z_seq - z_pred                        
-    r = r.reshape(-1, dim_z, 1)                  
-
-    Q_inv = torch.linalg.inv(Q)
-    Q_inv = Q_inv.unsqueeze(0)
-
-    mahal = torch.bmm(r.transpose(1,2), torch.bmm(Q_inv.expand(r.shape[0],-1,-1), r))
-    mahal = mahal.squeeze()
-
-    log_det = torch.linalg.slogdet(Q)[1]
-
-    return (mahal + log_det).mean()
-
-def diversity_loss(alpha_batch):
-    return -torch.log(alpha_batch.max(-1)[0]).mean()
-    # alpha_batch: [B, T, K]
-    avg_usage = alpha_batch.mean(dim=[0, 1])  
-    
-    H = -(avg_usage * (avg_usage + 1e-8).log()).sum()
-    H_max = math.log(avg_usage.shape[0])  # log(K)
-    
-    return H_max - H
-
-def imm_supervision_loss(alpha_gru, alpha_imm):
-    """
-    KL(alpha_imm || alpha_gru)
-    alpha_gru: [B, T, K]
-    alpha_imm: [B, T, K]
-    """
-    B, T, K = alpha_gru.shape
-
-    targets = alpha_imm.argmax(dim=-1)  # [B, T] 
-
-    # Cross-entropy
-    loss = F.cross_entropy(
-        alpha_gru.reshape(B * T, K),
-        targets.reshape(B * T),
-        reduction='mean'
-    )
-    return loss
-
-def compute_loss( ball_seq, x_dist_filt, x_dist_pred, 
-                 a_dist, a_seq, a_pred, a_filt, 
-                 z_dist, z_0, P_0,
-                 z_pred, z_filt, S_pred, P_filt, 
-                 R, Q, alpha_seq, alpha_imm,
+def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
+                a_dist, a_seq, a_smooth, a_pred_smooth,
+                z_dist, z_smooth, P_smooth, z_pred, P_pred, 
+                S_pred, Q, mask, alpha_seq,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
     """
     Computes ELBO loss:
@@ -118,30 +57,33 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred,
         z_filt:      [B, T, dim_z]           — filtered latent state
         P_pred:      [B, T, dim_z, dim_z]    — predicted state covariance
         P_filt:      [B, T, dim_z, dim_z]    — filtered state covariance
-        R:           [dim_a, dim_a]          — observation noise covariance
+        S_pred:      [B, T, dim_a, dim_a]
         Q:           [dim_z, dim_z]          — transition noise covariance
     """
-    B, T, dim_z = z_filt.shape if z_filt is not None else (*a_seq.shape[:2], 0)
-    _, _, dim_a = a_filt.shape
+    B, T, dim_z = z_smooth.shape if z_smooth is not None else (*a_seq.shape[:2], 0)
     device = ball_seq.device
 
-    # log p(x | a) — reconstruction
-    logits = x_dist_filt.logits
-    pos_weight = torch.tensor(tcfg.pos_weight, device=device)
-    L_recon = F.binary_cross_entropy_with_logits(
-        logits,
-        ball_seq,
-        pos_weight=pos_weight,
-        reduction='none'
-    ).sum(dim=(2, 3)).mean()
+    if mask is None:
+        mask = torch.ones(ball_seq.shape[:2], device=ball_seq.device)
 
     if phase == 0:
+        # log p(x | a) — reconstruction
+        logits = x_dist_smooth.logits
+        pos_weight = torch.tensor(tcfg.pos_weight, device=device)
+        L_recon = F.binary_cross_entropy_with_logits(
+            logits,
+            ball_seq,
+            pos_weight=pos_weight,
+            reduction='none'
+        ).sum(dim=(2, 3))
+        L_recon = (L_recon * mask).sum() / mask.sum()
+
         # KL(q(a|x) || N(0,I)) — encoder regularization
         mu  = a_dist.loc
         var = a_dist.scale ** 2
         L_regularization = 0.5 * (mu**2 + var - var.log() - 1).sum(-1).mean()
 
-        loss = (tcfg.lambda_recon * L_recon
+        loss = (0.3*tcfg.lambda_recon * L_recon
               + tcfg.get_lambda_kl(epoch) * L_regularization)
 
         terms = {
@@ -149,69 +91,76 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred,
         }
         
         return loss, terms
+    
+    if phase == 1 or phase == 2:
+        # log p(x | a) — reconstruction
+        logits = x_dist_smooth.logits
+        pos_weight = torch.tensor(tcfg.pos_weight, device=device)
+        L_recon = F.binary_cross_entropy_with_logits(
+            logits,
+            ball_seq,
+            pos_weight=pos_weight,
+            reduction='none'
+        ).sum(dim=(2, 3))
+        L_recon = (L_recon * mask).sum() / mask.sum()
 
-    if z_pred is not None and P_filt is not None:  # KVAE
         L_recon_pred = F.binary_cross_entropy_with_logits(
             x_dist_pred.logits[:, :-1, :, :],
             ball_seq[:, 1:, :, :],
             pos_weight=pos_weight,
             reduction='none'
-        ).sum(dim=(2, 3)).mean()
+        ).sum(dim=(2, 3))
+        L_recon_pred = (L_recon_pred * mask[:, 1:]).sum() / mask[:, 1:].sum()
 
         # log p(a | z) — innovation
-        L_innov = innovation_loss(a_filt, a_seq, R)
-        #L_innov = -D.MultivariateNormal(a_filt.reshape(-1, dim_a), 
-        #    scale_tril=torch.linalg.cholesky(R)).log_prob(a_seq.reshape(-1, dim_a)).mean()
+        L_innov = innovation_loss(a_pred_smooth, a_seq, S_pred, mask)
 
         # log p(z | u) — state prior
-        L_prior_z0 = - D.MultivariateNormal(
-            loc = z_0, scale_tril=torch.linalg.cholesky(P_0 + 1e-4 * torch.eye(P_0.shape[-1], device=P_0.device))
-        ).log_prob(z_filt[:, 0, :]).mean()
-
-        L_prior_trans = - D.MultivariateNormal(
+        L_prior = - D.MultivariateNormal(
             loc=z_pred[:, :-1, :].reshape(-1, dim_z),
-            scale_tril=torch.linalg.cholesky(Q + 1e-6 * torch.eye(Q.shape[-1], device=Q.device))
-        ).log_prob(z_filt[:, 1:, :].reshape(-1, dim_z)).mean()
-
-        L_prior = L_prior_z0 + L_prior_trans
+            scale_tril=torch.linalg.cholesky(Q)
+        ).log_prob(z_smooth[:, 1:, :].reshape(-1, dim_z))
+        mask_z = mask[:, 1:].reshape(-1)
+        L_prior = (L_prior * mask_z).sum() / mask_z.sum()
 
         # log q(a | x) — encoder entropy
-        L_entropy = - a_dist.log_prob(a_seq).sum(-1).mean()
+        L_entropy = - a_dist.log_prob(a_seq).sum(-1)
+        L_entropy = (L_entropy * mask).sum() / mask.sum()
 
         # log p(z | a, u) — Kalman posterior 
-        """
-        P_filt_reg = P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
-        P_filt_reg = P_filt_reg + cfg.QR_reg * torch.eye(dim_z, device=device).unsqueeze(0)
+        L_posterior = z_dist.entropy()
+        L_posterior = (L_posterior * mask).sum() / mask.sum()
 
-        eigvals = torch.linalg.eigvalsh(P_filt_reg)
-        if (eigvals < 0).any():
-            P_filt_reg = P_filt_reg + (eigvals.min().abs() + 1e-4) * torch.eye(dim_z, device=device).unsqueeze(0)
+        da = a_seq[:, 1:, :] - a_seq[:, :-1, :]
+        da_prev = da[:, :-1, :]   # [B, T-2, 2]
+        da_next = da[:, 1:, :]    # [B, T-2, 2]
+        cos_sim = F.cosine_similarity(da_prev, da_next, dim=-1)  # [B, T-2]
+        bounce_signal = (1 - cos_sim).clamp(0, 1)  # [B, T-2]
+        bounce_signal = bounce_signal / (bounce_signal.mean() + 1e-8)
 
-        L_posterior = - D.MultivariateNormal(
-            z_filt[:, 1:, :].reshape(-1, dim_z),
-            P_filt_reg
-        ).log_prob(z_pred[:, :-1, :].reshape(-1, dim_z)).mean()
-        """
-        L_posterior = z_dist.entropy().mean()
-
-        # alpha entropy
-        L_alpha =  diversity_loss(alpha_seq)
-        L_imm = imm_supervision_loss(alpha_seq, alpha_imm)
-
-        # R regularization
-        R_min_var = 0.015 
-        R_penalty = F.relu(R_min_var - torch.diag(R)).mean()  # Penalty za mali diag(R)
-        L_R_reg = 20 * R_penalty 
-
-        loss = (0.3 * tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
+        alpha_cos = F.cosine_similarity(
+            alpha_seq[:, 1:-1, :], 
+            alpha_seq[:, :-2, :], 
+            dim=-1
+        )
+        L_alpha_bounce = (bounce_signal * alpha_cos).mean()
+        
+        if phase == 1:
+            loss = (0.3 * tcfg.lambda_recon * L_recon +
+                0.5 * tcfg.lambda_recon * L_recon_pred +
                 (1 + 0*tcfg.lambda_innov) * L_innov +
                 (1 + 0*tcfg.lambda_prior) * L_prior -
-                (1 + 0*tcfg.lambda_entropy) * L_entropy  -
-                (1 + 0*tcfg.lambda_posterior) * L_posterior +
-                0*tcfg.lambda_alpha * L_alpha + 
-                0*tcfg.get_lambda_imm(epoch) * L_imm +
-                0*L_R_reg
-        )
+                (0.5 + 0*tcfg.lambda_entropy) * L_entropy  -
+                (0.1 + 0*tcfg.lambda_posterior) * L_posterior 
+                + 0.05 * L_alpha_bounce
+            )
+        else:
+            loss =(
+                (2 + 0*tcfg.lambda_innov) * L_innov +
+                (1 + 0*tcfg.lambda_prior) * L_prior -
+                (0.3 + 0*tcfg.lambda_posterior) * L_posterior 
+                + 0.15 * L_alpha_bounce
+            )
 
         terms = {
             "loss":      loss.item(),
@@ -221,31 +170,38 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred,
             "entropy":   L_entropy.item(),
             "posterior": L_posterior.item(),
         }
+        return loss, terms
 
-    else:  # CV_VAE / GRU_VAE
-        # KL(q(a|x) || N(0,I)) — encoder regularization
-        mu  = a_dist.loc
-        var = a_dist.scale ** 2
-        L_regularization = 0.5 * (mu**2 + var - var.log() - 1).sum(-1).mean()
 
-        # log p(a_{t+1} | z_pred_t) — prediction
-        a_dist_next = D.Normal(a_dist.loc[:, 1:, :], a_dist.scale[:, 1:, :])
-        L_prediction = -a_dist_next.log_prob(a_pred[:, :-1, :]).sum(-1).mean()
+        
 
-        # log q(a | x) — encoder entropy
-        L_entropy =  a_dist.log_prob(a_seq).sum(-1).mean()
 
-        loss = (tcfg.lambda_recon * L_recon
-              + tcfg.lambda_pred * L_prediction
-              + tcfg.get_lambda_kl(epoch) * L_regularization
-              - tcfg.lambda_entropy * L_entropy)
 
-        terms = {
-            "loss":    loss.item(),
-            "recon":   L_recon.item(),
-            "reg":     L_regularization.item(),
-            "pred":    L_prediction.item(),
-            "entropy": L_entropy.item()
-        }
+    # CV_VAE / GRU_VAE
+    return None, None  # skip prediction loss for now
+    # KL(q(a|x) || N(0,I)) — encoder regularization
+    mu  = a_dist.loc
+    var = a_dist.scale ** 2
+    L_regularization = 0.5 * (mu**2 + var - var.log() - 1).sum(-1).mean()
+
+    # log p(a_{t+1} | z_pred_t) — prediction
+    a_dist_next = D.Normal(a_dist.loc[:, 1:, :], a_dist.scale[:, 1:, :])
+    L_prediction = -a_dist_next.log_prob(a_pred[:, :-1, :]).sum(-1).mean()
+
+    # log q(a | x) — encoder entropy
+    L_entropy =  a_dist.log_prob(a_seq).sum(-1).mean()
+
+    loss = (tcfg.lambda_recon * L_recon
+            + tcfg.lambda_pred * L_prediction
+            + tcfg.get_lambda_kl(epoch) * L_regularization
+            - tcfg.lambda_entropy * L_entropy)
+
+    terms = {
+        "loss":    loss.item(),
+        "recon":   L_recon.item(),
+        "reg":     L_regularization.item(),
+        "pred":    L_prediction.item(),
+        "entropy": L_entropy.item()
+    }
 
     return loss, terms

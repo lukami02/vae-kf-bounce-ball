@@ -6,15 +6,15 @@ class SimulationConfig:
     size: tuple[int, int] = (32, 32)       # (H, W)
     gravity: bool = False                  # enable gravity
     seed: int = 12                         # RNG seed
-    T: int = 80                            # number of frames per episode
+    T: int = 20                            # number of frames per episode
     substeps: int = 4                      # number of physics substeps per frame
-    episodes: int = 2048                   # number of episodes to generate
+    episodes: int = 24000                   # number of episodes to generate
     data_dir:  str = "dataset/"            # directory to save generated .npy files
 
     # ball
-    ball_scale: float = 0.063              # ball radius as proportion of size
+    ball_scale: float = 0.1                 # ball radius as proportion of size
     ball_sigma: float = 0.03               # radius of Gaussian blob in pixels
-    ball_radius: float = 0.06
+    ball_radius: float = 0.1               # ball radius in pixels (if ball_gaussian is False)
     speed_range: tuple[float, float] = (0.03, 0.06)
     ball_gaussian: bool = False
     

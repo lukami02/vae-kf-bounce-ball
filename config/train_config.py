@@ -7,10 +7,10 @@ class TrainConfig:
 
     # Training
     epochs: int = 100
-    vae_pretrain_epochs: int = 0
-    batch_size: int = 32
-    learning_rate: float = 1e-3
-    grad_clip: float = 5
+    vae_pretrain_epochs: int = 20
+    batch_size: int = 64
+    learning_rate: float = 1e-4
+    grad_clip: float = 1.0
     seed: int = 12
     val_split:  float = 0.1    
     test_split: float = 0.01
@@ -18,10 +18,10 @@ class TrainConfig:
 
     # Optimizer
     optimizer: str   = "adamw"     
-    weight_decay: float = 1e-5       
+    weight_decay: float = 0      
     lr_scheduler: str = "cosine" 
     lr_step_size: int = 5 
-    lr_gamma: float = 0.5       
+    lr_gamma: float = 0.6       
 
     # Loss weights
     
@@ -42,9 +42,9 @@ class TrainConfig:
     kl_warmup_epochs: int = 10  
 
     # Free-running training
-    free_running_steps: int = 0     # autoregressive rollout length
-    free_running_warmup: int = 30
-    p_mask: float = 0.5
+    free_running_steps: int = 6     # autoregressive rollout length
+    free_running_warmup: int = 50  # epochs before enabling free-running loss
+    p_mask: float = 0.1
 
     imm_warmup_epochs: int  = 10
 

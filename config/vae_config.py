@@ -26,7 +26,7 @@ class VAEConfig:
     encoder_ball_channels: list = field(default_factory=lambda: [32, 64] )    # filters for moving ball CNN
     encoder_obstacle_channels: list = field(default_factory=lambda: [32, 64]) # filters for static obstacle CNN
     dim_obstacle: int = 16                          # latent size for obstacle features
-    enc_activation: type = nn.ELU                   # activation class for encoder layers
+    enc_activation: type = nn.ReLU                  # activation class for encoder layers
 
     # decoder architecture
     decoder_channels: list = field(default_factory=lambda: [64, 32])         # filters for moving ball CNN
