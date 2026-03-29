@@ -42,7 +42,7 @@ class BallDataset(Dataset):
 
         sim = BouncingBallSim(self.sim_cfg)
         sim.cfg.episodes = n_episodes
-        ball_data, obstacle_data = sim.generate_dataset()
+        ball_data, obstacle_data = sim.generate_dataset(seed=self.sim_cfg.seed + {"train": 0, "val": 1, "test": 2}[split])
 
         os.makedirs(self.sim_cfg.data_dir, exist_ok=True)
         np.save(ball_path,     ball_data)

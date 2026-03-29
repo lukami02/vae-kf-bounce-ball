@@ -8,8 +8,8 @@ class TrainConfig:
     # Training
     epochs: int = 100
     vae_pretrain_epochs: int = 0
-    batch_size: int = 256
-    learning_rate: float = 2e-3
+    batch_size: int = 32
+    learning_rate: float = 1e-3
     grad_clip: float = 5
     seed: int = 12
     val_split:  float = 0.1    

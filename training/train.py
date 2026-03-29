@@ -60,9 +60,9 @@ def get_optimizer(model, tcfg: TrainConfig, phase=0):
             {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
             {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate if phase==0 else 0.1*tcfg.learning_rate},
             {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
-            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.4},
-            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.2},
-            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.2},
+            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate},
+            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate },
+            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate },
         ]
         if model.B_matrices is not None:
             param_groups.append(
@@ -124,7 +124,7 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             current_mask = mask[:ball_seq.shape[0], :]
         else: current_mask = None
     
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_dist, z_0, P_0, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -134,6 +134,9 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
             a_seq      = a_seq,
             a_pred     = a_pred,
             a_filt     = a_filt,
+            z_dist     = z_dist,
+            z_0        = z_0,
+            P_0        = P_0,
             z_pred     = z_pred,
             z_filt     = z_filt,
             S_pred     = S_pred,
@@ -175,7 +178,7 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
     
-        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
+        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _,_ , _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
@@ -185,6 +188,9 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
             a_seq      = a_seq,
             a_pred     = None,
             a_filt     = None,
+            z_dist= None,
+            z_0 = None,
+            P_0 = None,
             z_pred     = None,
             z_filt     = None,
             S_pred     = None,
@@ -234,7 +240,7 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
             current_mask = mask[:ball_seq.shape[0], :]
         else: current_mask = None
 
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_dist, z_0, P_0, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
         _, terms = compute_loss(
             ball_seq   = ball_seq,
             x_dist_filt = x_dist_filt,
@@ -243,6 +249,9 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
             a_seq      = a_seq,
             a_pred     = a_pred,
             a_filt     = a_filt,
+            z_dist= z_dist,
+            z_0 = z_0,
+            P_0 = P_0,
             z_pred     = z_pred,
             z_filt     = z_filt,
             S_pred     = S_pred,

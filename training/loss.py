@@ -40,7 +40,7 @@ def innovation_loss(a_filt, a_seq, S_pred):
     I = torch.eye(dim_a, device=device).unsqueeze(0)
 
     S = 0.5 * (S + S.transpose(-1, -2))     # enforce symmetry
-    S = S + 1e-4 * I                        # jitter
+    S = S + 1e-6 * I                        # jitter
 
     L = torch.linalg.cholesky(S)
 
@@ -57,7 +57,6 @@ def transition_loss(z_seq, z_pred, Q):
     Q     : [dim_z, dim_z]
     """
     B, T, dim_z = z_seq.shape
-
     r = z_seq - z_pred                        
     r = r.reshape(-1, dim_z, 1)                  
 
@@ -99,7 +98,11 @@ def imm_supervision_loss(alpha_gru, alpha_imm):
     )
     return loss
 
-def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_filt, z_pred, z_filt, S_pred, P_filt, R, Q, alpha_seq, alpha_imm,
+def compute_loss( ball_seq, x_dist_filt, x_dist_pred, 
+                 a_dist, a_seq, a_pred, a_filt, 
+                 z_dist, z_0, P_0,
+                 z_pred, z_filt, S_pred, P_filt, 
+                 R, Q, alpha_seq, alpha_imm,
                 cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
     """
     Computes ELBO loss:
@@ -119,6 +122,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         Q:           [dim_z, dim_z]          — transition noise covariance
     """
     B, T, dim_z = z_filt.shape if z_filt is not None else (*a_seq.shape[:2], 0)
+    _, _, dim_a = a_filt.shape
     device = ball_seq.device
 
     # log p(x | a) — reconstruction
@@ -155,17 +159,18 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         ).sum(dim=(2, 3)).mean()
 
         # log p(a | z) — innovation
-        L_innov = innovation_loss(a_filt, a_seq, S_pred)
+        L_innov = innovation_loss(a_filt, a_seq, R)
+        #L_innov = -D.MultivariateNormal(a_filt.reshape(-1, dim_a), 
+        #    scale_tril=torch.linalg.cholesky(R)).log_prob(a_seq.reshape(-1, dim_a)).mean()
 
         # log p(z | u) — state prior
         L_prior_z0 = - D.MultivariateNormal(
-            torch.zeros(dim_z, device=device, dtype=z_filt.dtype),
-            torch.eye(dim_z, device=device, dtype=z_filt.dtype)
+            loc = z_0, scale_tril=torch.linalg.cholesky(P_0 + 1e-4 * torch.eye(P_0.shape[-1], device=P_0.device))
         ).log_prob(z_filt[:, 0, :]).mean()
 
         L_prior_trans = - D.MultivariateNormal(
-            z_pred[:, :-1, :].reshape(-1, dim_z),
-            Q.unsqueeze(0).expand(B * (T - 1), -1, -1)
+            loc=z_pred[:, :-1, :].reshape(-1, dim_z),
+            scale_tril=torch.linalg.cholesky(Q + 1e-6 * torch.eye(Q.shape[-1], device=Q.device))
         ).log_prob(z_filt[:, 1:, :].reshape(-1, dim_z)).mean()
 
         L_prior = L_prior_z0 + L_prior_trans
@@ -174,6 +179,7 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         L_entropy = - a_dist.log_prob(a_seq).sum(-1).mean()
 
         # log p(z | a, u) — Kalman posterior 
+        """
         P_filt_reg = P_filt[:, 1:, :, :].reshape(-1, dim_z, dim_z)
         P_filt_reg = P_filt_reg + cfg.QR_reg * torch.eye(dim_z, device=device).unsqueeze(0)
 
@@ -185,6 +191,8 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
             z_filt[:, 1:, :].reshape(-1, dim_z),
             P_filt_reg
         ).log_prob(z_pred[:, :-1, :].reshape(-1, dim_z)).mean()
+        """
+        L_posterior = z_dist.entropy().mean()
 
         # alpha entropy
         L_alpha =  diversity_loss(alpha_seq)
@@ -196,13 +204,13 @@ def compute_loss( ball_seq, x_dist_filt, x_dist_pred, a_dist, a_seq, a_pred, a_f
         L_R_reg = 20 * R_penalty 
 
         loss = (0.3 * tcfg.lambda_recon * (L_recon + L_recon_pred)/2 +
-                tcfg.lambda_innov * L_innov +
-                tcfg.lambda_prior * L_prior -
-                tcfg.lambda_entropy * L_entropy  +
-                tcfg.lambda_posterior * L_posterior +
-                tcfg.lambda_alpha * L_alpha + 
-                tcfg.get_lambda_imm(epoch) * L_imm +
-                L_R_reg
+                (1 + 0*tcfg.lambda_innov) * L_innov +
+                (1 + 0*tcfg.lambda_prior) * L_prior -
+                (1 + 0*tcfg.lambda_entropy) * L_entropy  -
+                (1 + 0*tcfg.lambda_posterior) * L_posterior +
+                0*tcfg.lambda_alpha * L_alpha + 
+                0*tcfg.get_lambda_imm(epoch) * L_imm +
+                0*L_R_reg
         )
 
         terms = {

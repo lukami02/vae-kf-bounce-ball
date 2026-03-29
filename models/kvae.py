@@ -27,6 +27,7 @@ class KVAE(BaseVAE):
         self.C_matrices = nn.Parameter(
             self.init_C_matrices()
         )
+
         # Control matrices [K, dim_z, dim_u]
         if cfg.dim_u > 0:
             self.B_matrices = nn.Parameter(cfg.B_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_u))
@@ -89,12 +90,12 @@ class KVAE(BaseVAE):
             return (
                 x_dist_filt, None,
                 a_dist, a_seq, None, None,
-                None, None, None, None,
+                None, None, None, None, None, None, None,
                 None, None, None, None, None
             )
-        
+
         # Kalman filter
-        z_filt, P_filt, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, alpha_imm, R, Q = self.kalman(
+        z_filt, P_filt, z_dist, z_pred, P_pred, a_filt, a_pred, S_pred, alpha_seq, alpha_imm, R, Q = self.kalman(
             a_seq       = a_seq,
             alpha_net   = self.alpha_net,
             h_obs       = h_obs,
@@ -113,6 +114,7 @@ class KVAE(BaseVAE):
         return (
             x_dist_filt, x_dist_pred,
             a_dist, a_seq, a_filt, a_pred,
+            z_dist, self.kalman.z_0, self.kalman.P_0,
             z_filt, P_filt, z_pred, P_pred,
             S_pred, alpha_seq, alpha_imm, R, Q
         )

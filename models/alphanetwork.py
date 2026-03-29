@@ -59,7 +59,8 @@ class AlphaNetwork(nn.Module):
 
         state = self.gru(inputs, state)
         logits = self.fc_alpha(state)
-
+        alpha = F.softmax(logits, dim=-1)
+        """
         if self.training:
             alpha = F.gumbel_softmax(logits, tau=temp, hard=False, dim=-1) 
         else:
@@ -67,7 +68,7 @@ class AlphaNetwork(nn.Module):
                 torch.argmax(logits, dim=-1),
                 num_classes=logits.size(-1)
             ).float()
-            
+        """
         return alpha, state
     
     def init_state(self, batch_size, device):

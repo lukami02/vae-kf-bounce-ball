@@ -184,10 +184,13 @@ class BouncingBallSim:
 
         return frames, obstacle_frame
 
-    def generate_dataset(self):
+    def generate_dataset(self, seed=None):
         """
         Creates a large-scale dataset of physics simulations.
         """
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+
         ball_data = np.zeros((self.cfg.episodes, self.cfg.T, self.H, self.W), dtype=np.float32)
         obstacle_data = np.zeros((self.cfg.episodes, self.H, self.W), dtype=np.float32)
 
