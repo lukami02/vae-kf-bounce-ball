@@ -25,7 +25,6 @@ class BallEncoder(nn.Module):
         for i in range(len(channels) - 1):
             layers += [
                 nn.Conv2d(channels[i], channels[i + 1], 3, stride=2, padding=1),
-                nn.BatchNorm2d(channels[i + 1]),
                 vae_cfg.enc_activation(),
             ]
 
@@ -63,7 +62,7 @@ class BallEncoder(nn.Module):
         enc = enc.view(B * T, -1)
 
         a_mu = self.fc_mu(enc)
-        a_std = F.softplus(self.fc_var(enc)) + 1e-6
+        a_std = 0.03 * F.sigmoid(self.fc_var(enc))
         #a = self.reparametrize(a_mu, a_var)
         a_mu = a_mu.view(B, T, self.cfg.dim_a)
         a_std = a_std.view(B, T, self.cfg.dim_a)
@@ -73,26 +72,35 @@ class ObstacleEncoder(nn.Module):
     """
     Encodes static obstacle image into context vector.
     """
-    def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig):
+    def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig, ball_encoder: BallEncoder):
         super().__init__()
-        channels = [1] + vae_cfg.encoder_obstacle_channels
-        layers = []
-        for i in range(len(channels)-1):
-            layers += [
-                nn.Conv2d(channels[i], channels[i + 1], 3, stride=1, padding=1),
-                nn.BatchNorm2d(channels[i + 1]),
-                #vae_cfg.enc_activation(),
-            ]
-        layers.append(nn.AdaptiveAvgPool2d((6, 6)))
-        self.cnn = nn.Sequential(*layers)
+        self.cnn = ball_encoder.cnn
         
-        self.feature_proj = nn.Conv2d(vae_cfg.encoder_obstacle_channels[-1], vae_cfg.alpha_units, 1)
+        self.proj_cnn = nn.Sequential(
+            nn.Conv2d(
+                vae_cfg.encoder_ball_channels[-1],
+                vae_cfg.encoder_ball_channels[-1] // 2,
+                3, stride=2, padding=1
+            ),
+            vae_cfg.enc_activation(),
+        )
+
+        self._flat_size = self._get_flat_size(sim_cfg.size)
+
+        self.proj_fc = nn.Linear( self._flat_size, vae_cfg.alpha_units)
+
+    def _get_flat_size(self, image_size):
+        dummy = torch.zeros(1, 1, image_size[0], image_size[1])
+        out = self.cnn(dummy)
+        out = self.proj_cnn(out)
+        return out.view(1, -1).shape[1]
 
     def forward(self, obs_img):
         # obs_img: [B, 1, H, W]
-        features = self.cnn(obs_img) # [B, C, H', W']
-        features = self.feature_proj(features) # [B, alpha_units, H', W']
-        
-        B, C, H, W = features.shape
-        features = features.view(B, C, -1).transpose(1, 2)
+        B = obs_img.shape[0] 
+        features = self.cnn(obs_img).detach()
+        features = self.proj_cnn(features)
+        features = features.view(B, -1)
+        features = self.proj_fc(features)
+
         return features

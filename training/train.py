@@ -3,6 +3,7 @@ import logging
 import argparse
 import os
 import sys
+import math
 sys.path.append("..")
 from torch.utils.data import DataLoader
 from config.vae_config import VAEConfig
@@ -56,13 +57,14 @@ def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.
 def get_optimizer(model, tcfg: TrainConfig, phase=0):
     if isinstance(model, KVAE):
         param_groups = [
-            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate if phase==0 else 0.2*tcfg.learning_rate},
-            {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
-            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate if phase==0 else 0.1*tcfg.learning_rate},
+            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate*0.05},
+            {"params": model.obstacle_encoder.proj_fc.parameters(), "lr": tcfg.learning_rate},
+            {"params": model.obstacle_encoder.proj_cnn.parameters(), "lr": tcfg.learning_rate},
+            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate*0.05},
             {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
             {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate},
             {"params": [model.A_matrices],                  "lr": tcfg.learning_rate },
-            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate },
+            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate},
         ]
         if model.B_matrices is not None:
             param_groups.append(
@@ -78,10 +80,9 @@ def get_optimizer(model, tcfg: TrainConfig, phase=0):
     else:
         raise ValueError(f"Unknown optimizer: {tcfg.optimizer}")
 
-
 def get_scheduler(optimizer, tcfg: TrainConfig):
     if tcfg.lr_scheduler == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.epochs, eta_min=1e-5)
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-5)
     elif tcfg.lr_scheduler == "step":
         return torch.optim.lr_scheduler.StepLR(optimizer, step_size=tcfg.lr_step_size, gamma=tcfg.lr_gamma)
     elif tcfg.lr_scheduler == "none":
@@ -103,7 +104,7 @@ def unfreeze_all(model):
     for param in model.parameters():
         param.requires_grad = True
 
-def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
+def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device, phase=1):
     model.train()
     if isinstance(model, KVAE):
         total_terms = {"loss": 0, "recon": 0, "innov": 0, "prior": 0, "entropy": 0, "posterior": 0}
@@ -111,11 +112,20 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
         total_terms = {"loss": 0, "recon": 0, "reg": 0, "pred": 0, "entropy": 0}
 
     for batch in loader:
+
         if len(batch) == 2:
             ball_seq, obstacle_img = batch
             u_seq = None
         else:
             ball_seq, obstacle_img, u_seq = batch
+        B, T, _, _ = ball_seq.shape
+        if epoch < 61:
+            mask = make_mask(B, T, device, 0, 0.2, randomize_start=True)
+        #elif epoch < 120:
+        #    mask = make_mask(B, T, device, 0, 0.3, randomize_start=True)
+        else:
+            steps = min(int(10*(epoch-60) / 100), 10)
+            mask = make_mask(B, T, device, steps, 0.1, randomize_start=True)
 
         ball_seq     = ball_seq.to(device)
         obstacle_img = obstacle_img.to(device)
@@ -123,37 +133,45 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
         if mask is not None:
             current_mask = mask[:ball_seq.shape[0], :]
         else: current_mask = None
-    
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_dist, z_0, P_0, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
+
+        (x_dist_smooth, x_dist_pred, 
+        a_dist, a_seq, a_smooth, a_pred_smooth,
+        z_dist, z_smooth, P_smooth, z_pred, P_pred,
+        R, Q, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=100)
+
+        #(_, _, 
+        #_, _, _, _,
+        #z_dist_full, _, _, _, _,
+        #R, Q, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
-            x_dist_filt = x_dist_filt,
-            x_dist_pred = x_dist_pred,
+            x_dist_smooth = x_dist_pred,
+            x_dist_pred=x_dist_pred,
             a_dist     = a_dist,
             a_seq      = a_seq,
-            a_pred     = a_pred,
-            a_filt     = a_filt,
-            z_dist     = z_dist,
-            z_0        = z_0,
-            P_0        = P_0,
-            z_pred     = z_pred,
-            z_filt     = z_filt,
-            S_pred     = S_pred,
-            P_filt     = P_filt,
-            R          = R,
+            a_smooth   = a_smooth,
+            z_dist_full= None,
+            z_dist      = z_dist,
+            z_smooth    = z_smooth,
+            P_smooth    = P_smooth,
+            z_pred= z_pred,
+            P_pred= P_pred,
+            R = R,
             Q          = Q,
-            alpha_seq  = alpha_seq,
-            alpha_imm  = alpha_imm,
+            alpha_seq= alpha_seq,
+            mask=None,
             cfg        = cfg,
             tcfg       = tcfg,
-            epoch      = epoch
+            epoch      = epoch,
+            phase      = phase
         )
         
         optimizer.zero_grad()
         loss.backward()
         if tcfg.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
+
         optimizer.step()
 
         for k, v in terms.items():
@@ -178,27 +196,33 @@ def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
         obstacle_img = obstacle_img.to(device)
         u_seq        = u_seq.to(device) if u_seq is not None else None
     
-        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _,_ , _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
+        (x_dist_smooth, x_dist_pred, 
+        a_dist, a_seq, a_smooth, a_pred_smooth,
+        z_dist, z_smooth, P_smooth, z_pred, P_pred,
+        R, Q, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
+
+        #(_, _, 
+        #_, _, _, _,
+        #z_dist_full, _, _, _, _,
+        #R, Q, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=None, epoch=epoch)
 
         loss, terms = compute_loss(
             ball_seq   = ball_seq,
-            x_dist_filt = x_dist_filt,
-            x_dist_pred = None,
+            x_dist_smooth = x_dist_smooth,
+            x_dist_pred=x_dist_pred,
             a_dist     = a_dist,
             a_seq      = a_seq,
-            a_pred     = None,
-            a_filt     = None,
-            z_dist= None,
-            z_0 = None,
-            P_0 = None,
-            z_pred     = None,
-            z_filt     = None,
-            S_pred     = None,
-            P_filt     = None,
+            a_smooth   = a_smooth,
+            z_dist_full= None,
+            z_dist      = z_dist,
+            z_smooth    = z_smooth,
+            P_smooth    = P_smooth,
+            z_pred= z_pred,
+            P_pred= P_pred,
             R          = None,
             Q          = None,
-            alpha_seq  = None,
-            alpha_imm  = None,
+            alpha_seq= None,
+            mask       = None,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
@@ -240,26 +264,33 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
             current_mask = mask[:ball_seq.shape[0], :]
         else: current_mask = None
 
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_dist, z_0, P_0, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+        (x_dist_smooth, x_dist_pred, 
+        a_dist, a_seq, a_smooth, a_pred_smooth,
+        z_dist, z_smooth, P_smooth, z_pred, P_pred,
+        R, Q, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
+
+        #(_, _, 
+        #_, _, _, _,
+        #z_dist_full, _, _, _, _,
+        #R, Q, alpha_seq) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
+
         _, terms = compute_loss(
             ball_seq   = ball_seq,
-            x_dist_filt = x_dist_filt,
-            x_dist_pred = x_dist_pred,
+            x_dist_smooth = x_dist_smooth,
+            x_dist_pred=x_dist_pred,
             a_dist     = a_dist,
             a_seq      = a_seq,
-            a_pred     = a_pred,
-            a_filt     = a_filt,
-            z_dist= z_dist,
-            z_0 = z_0,
-            P_0 = P_0,
-            z_pred     = z_pred,
-            z_filt     = z_filt,
-            S_pred     = S_pred,
-            P_filt     = P_filt,
+            a_smooth   = a_smooth,
+            z_dist_full= None,
+            z_dist      = z_dist,
+            z_smooth    = z_smooth,
+            P_smooth    = P_smooth,
+            z_pred= z_pred,
+            P_pred= P_pred,
             R          = R,
             Q          = Q,
-            alpha_seq  = alpha_seq,
-            alpha_imm  = alpha_imm,
+            alpha_seq= alpha_seq,
+            mask=None,
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch
@@ -271,7 +302,6 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
 
     n = len(loader)
     return {k: v / n for k, v in total_terms.items()}
-
 
 def save_checkpoint(model, optimizer, epoch, terms, tcfg, logger, path=None):
     os.makedirs(tcfg.checkpoint_dir, exist_ok=True)
@@ -317,43 +347,93 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     logger.info("=" * 60)
 
     best_val_loss = float("inf")
-    
-    if isinstance(model, KVAE):
-        freeze_kalman(model)
 
     logger.info("=" * 60)
-    logger.info("Starting training")
-    logger.info(f"Phase 1: VAE pretraining for {tcfg.vae_pretrain_epochs} epochs")
+    logger.info("Phase 1: VAE pretraining")
     logger.info("=" * 60)
-    for epoch in range(1, tcfg.vae_pretrain_epochs + 1):
-        pretrain_terms = pretrain_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device)
+
+    # freeze all
+    for params in model.ball_encoder.parameters():
+        params.requires_grad = False
+    for params in model.decoder.parameters():
+        params.requires_grad = False
+
+
+
+    for epoch in range(1, 201):
+        B = tcfg.batch_size
+        T = sim_cfg.T
+
+        mask_val = make_mask(B, T, device, 10, p_mask=0, randomize_start=False)
+        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, None, device, phase=1)
+        val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
+
         if scheduler is not None:
             scheduler.step()
+
+        # INFO log 
         if epoch % tcfg.log_every == 0 or epoch == 1:
             lr = optimizer.param_groups[0]["lr"]
-            logger.info(
+            if isinstance(model, KVAE):
+                logger.info(
                     f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
-                    f"loss={pretrain_terms['loss']:.4f}  ")
+                    f"loss={train_terms['loss']:.4f}  "
+                    f"recon={train_terms['recon']:.4f}  "
+                    f"innov={train_terms['innov']:.4f}  "
+                    f"prior={train_terms['prior']:.4f}  "
+                    f"entropy={train_terms['entropy']:.4f}  "
+                    f"posterior={train_terms['posterior']:.4f} | "
+                    f"val_loss={val_terms['loss']:.4f}"
+                )
+            else:
+                logger.info(
+                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
+                    f"loss={train_terms['loss']:.4f}  "
+                    f"recon={train_terms['recon']:.4f}  "
+                    f"reg={train_terms['reg']:.4f}  "
+                    f"pred={train_terms['pred']:.4f}  "
+                    f"entropy={train_terms['entropy']:.4f} | "
+                    f"val_loss={val_terms['loss']:.4f}"
+                )
 
-    unfreeze_all(model)
-    optimizer = get_optimizer(model, tcfg)
-    scheduler = get_scheduler(optimizer, tcfg)
-    
+        # Checkpoint
+        if epoch % tcfg.save_every == 0:
+            save_checkpoint(model, optimizer, epoch, train_terms, tcfg, logger)
+
+        # Best model
+        if val_terms["loss"] < best_val_loss:
+            best_val_loss = val_terms["loss"]
+            save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
+                            path=f"{tcfg.checkpoint_dir}/best_vae.pt")
+            logger.info(f"  New best val loss: {best_val_loss:.4f}")
+
+
     logger.info("=" * 60)
     logger.info("Phase 2: Full training")
     logger.info("=" * 60)
 
-    for epoch in range(1, tcfg.epochs + 1):
+    unfreeze_all(model)
+    for params in model.ball_encoder.parameters():
+        params.requires_grad = False
+    for params in model.decoder.parameters():
+        params.requires_grad = False
+
+    optimizer = get_optimizer(model, tcfg, phase=2)
+    scheduler = get_scheduler(optimizer, tcfg)
+    for epoch in range(1, 1):
         B = tcfg.batch_size
         T = sim_cfg.T
-        if epoch >= tcfg.free_running_warmup + 20:
-            mask = make_mask(B, T, device, 0, tcfg.p_mask, randomize_start=True)
+        if epoch >= 80:
+            mask = make_mask(B, T, device, 6, 0.1, randomize_start=False)
+        elif epoch >= 50:
+            mask = make_mask(B, T, device, 6, 0.1, randomize_start=True)
         else:
-            mask = make_mask(B, T, device, 0, tcfg.p_mask* (max((epoch - 20),0)/tcfg.free_running_warmup), randomize_start=True)
+            steps = int(6 * epoch / 50)
+            mask = make_mask(B, T, device, steps, 0.1, randomize_start=True)
+        mask = make_mask(B, T, device, 0, 0.1, randomize_start=True)
+        mask_val = make_mask(B, T, device, 6, p_mask=0.0, randomize_start=False)
 
-        mask_val = make_mask(B, T, device, 10, p_mask=0.0, randomize_start=False)
-
-        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
+        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device, phase=2)
         val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
 
         if scheduler is not None:
@@ -395,13 +475,40 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
                             path=f"{tcfg.checkpoint_dir}/best.pt")
             logger.info(f"  New best val loss: {best_val_loss:.4f}")
 
+    logger.info("=" * 60)
+    logger.info("Starting training")
+    logger.info(f"Phase 3: VAE pretraining for {tcfg.vae_pretrain_epochs} epochs")
+    logger.info("=" * 60)
+
+    #ckpt = torch.load(f"{tcfg.checkpoint_dir}/best.pt", map_location=device)
+    #model.load_state_dict(ckpt["model"])
+
+    unfreeze_all(model)
+    if isinstance(model, KVAE):
+        freeze_kalman(model)
+    for params in model.ball_encoder.parameters():
+        params.requires_grad = False
+    tcfg.vae_pretrain_epochs = 0
+    for epoch in range(1, 1):
+        pretrain_terms = pretrain_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device)
+        if scheduler is not None:
+            scheduler.step()
+        if epoch % tcfg.log_every == 0 or epoch == 1:
+            lr = optimizer.param_groups[0]["lr"]
+            logger.info(
+                    f"Epoch {epoch:4d}/{tcfg.vae_pretrain_epochs} | lr={lr:.2e} | "
+                    f"loss={pretrain_terms['loss']:.4f}  ")
+
+
     save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
-                    path=f"{tcfg.checkpoint_dir}/best.pt")
+                path=f"{tcfg.checkpoint_dir}/final.pt")
 
     logger.info("=" * 60)
-    logger.info(f"Training done. Best val loss: {best_val_loss:.4f}")
+    logger.info(f"Training done.")
     logger.info("=" * 60)
+
     return model
+
 
 
 if __name__ == "__main__":
