@@ -19,10 +19,10 @@ class AlphaNetwork(nn.Module):
         if cfg.dim_u > 0:
             input_dim += cfg.dim_u
 
-        #self.fc1 = nn.Linear(input_dim, cfg.alpha_units // 2) 
-        self.fc2 = nn.Linear(cfg.alpha_units // 2, cfg.num_matrices) 
+        self.fc1 = nn.Linear(input_dim, cfg.alpha_units) 
+        self.fc2 = nn.Linear(cfg.alpha_units, cfg.num_matrices) 
         
-        self.gru = nn.GRUCell(input_dim, cfg.alpha_units // 2)
+        self.gru = nn.GRUCell(cfg.alpha_units, cfg.alpha_units)
 
     def forward(self, a_k, h_obs_features, state=None, u_k=None, temp=1):
         # h_obs_features [B, alpha_units] 
@@ -38,12 +38,14 @@ class AlphaNetwork(nn.Module):
         if u_k is not None:
             x = torch.cat([x, u_k], dim=-1)  # [B, dim_a + alpha_units + dim_u]
 
-        #x = F.relu(self.fc1(x))
-        gru_out = self.gru(x, state)  # [B, alpha_units//2]
+        x = F.relu(self.fc1(x))
+
+        gru_out = self.gru(x, state) 
+
         logits = self.fc2(gru_out)
         alpha = F.softmax(logits, dim=-1)
 
         return alpha, gru_out
     
     def init_state(self, batch_size, device):
-        return torch.zeros(batch_size, self.cfg.alpha_units//2, device=device)
+        return torch.zeros(batch_size, self.cfg.alpha_units, device=device)

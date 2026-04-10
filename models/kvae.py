@@ -15,7 +15,7 @@ class KVAE(BaseVAE):
     def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig):
         super().__init__(cfg, sim_cfg)
 
-        self.alpha_net        = AlphaNetwork(cfg, obstacle=False)
+        self.alpha_net        = AlphaNetwork(cfg, obstacle=True)
         self.kalman           = KalmanFilter(cfg)
 
         # State transition matrices [K, dim_z, dim_z]
@@ -34,67 +34,17 @@ class KVAE(BaseVAE):
 
         # Control matrices [K, dim_z, dim_u]
         if cfg.dim_u > 0:
-            self.B_matrices = nn.Parameter(cfg.B_std * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_u))
+            self.B_matrices = nn.Parameter(0.05 * torch.randn(cfg.num_matrices, cfg.dim_z, cfg.dim_u))
         else:
             self.B_matrices = None
 
-    def init_A_matrices(self, dt=0.9):
-        K, dim_z = self.cfg.num_matrices, self.cfg.dim_z
-        A = torch.zeros(K, dim_z, dim_z)
-        
-        # Sve matrice krecu od identiteta
-        for k in range(K):
-            A[k] = torch.eye(dim_z)
-        
-        # Mode 0
-        half = dim_z // 2
-        for i in range(half):
-            A[0, i, i + half] = dt  # p_i += v_i * dt
-
-        # Mode 1
-        A[1] = A[0].clone()
-        quarter = max(1, half // 2)
-        for i in range(quarter):
-            A[1, i + half, i + half] = - dt
-
-        # Mode 2
-        if K > 2:
-            A[2] = A[0].clone()
-            for i in range(quarter, half):
-                A[2, i + half, i + half] = - dt
-
-        for k in range(3, K):
-            A[k] = A[0].clone()
-            A[k] += self.cfg.A_std * torch.randn(dim_z, dim_z)
-
-        return A
-
-    def init_C_matrices(self):
-        C = torch.zeros(self.cfg.num_matrices, self.cfg.dim_a, self.cfg.dim_z)
-        for i in range(self.cfg.num_matrices):
-            for j in range(min(self.cfg.dim_a, self.cfg.dim_z)):
-                C[i, j, j] = 1.0
-        C += 0.03 * torch.randn_like(C)
-        return C
-
     def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, epoch=100, phase=1):
-
-        class ScaleGrad(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, scale):
-                ctx.scale = scale
-                return x  # forward nepromenjen
-
-            @staticmethod
-            def backward(ctx, grad):
-                return grad * ctx.scale, None
-        
+       
         B, T, H, W = ball_seq.shape
 
         # Encode
         a_dist = self.ball_encoder(ball_seq)                            # a_seq: [B, T, dim_a]
         h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))        # [B, dim_obstacle]
-        h_obs_in = ScaleGrad.apply(h_obs, 1.0 / T)
 
         if self.training:
             a_seq = a_dist.rsample()  
@@ -115,7 +65,7 @@ class KVAE(BaseVAE):
         z_smooth, P_smooth, z_dist, z_pred, P_pred, a_smooth, a_pred_smooth, alpha_seq, S_pred = self.kalman(
             a_seq       = a_seq,
             alpha_net   = self.alpha_net,
-            h_obs       = h_obs_in,
+            h_obs       = h_obs,
             A_matrices  = self.A_matrices,
             C_matrices  = self.C_matrices,
             B_matrices  = self.B_matrices,

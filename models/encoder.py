@@ -75,32 +75,21 @@ class ObstacleEncoder(nn.Module):
     def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig, ball_encoder: BallEncoder):
         super().__init__()
         self.cnn = ball_encoder.cnn
-        
-        self.proj_cnn = nn.Sequential(
-            nn.Conv2d(
-                vae_cfg.encoder_ball_channels[-1],
-                vae_cfg.encoder_ball_channels[-1] // 2,
-                3, stride=2, padding=1
-            ),
-            vae_cfg.enc_activation(),
-        )
 
         self._flat_size = self._get_flat_size(sim_cfg.size)
 
-        self.proj_fc = nn.Linear( self._flat_size, vae_cfg.alpha_units)
+        self.fc_proj = nn.Linear( self._flat_size, vae_cfg.alpha_units)
 
     def _get_flat_size(self, image_size):
         dummy = torch.zeros(1, 1, image_size[0], image_size[1])
         out = self.cnn(dummy)
-        out = self.proj_cnn(out)
         return out.view(1, -1).shape[1]
 
     def forward(self, obs_img):
         # obs_img: [B, 1, H, W]
         B = obs_img.shape[0] 
         features = self.cnn(obs_img).detach()
-        features = self.proj_cnn(features)
         features = features.view(B, -1)
-        features = self.proj_fc(features)
+        features = self.fc_proj(features)
 
         return features

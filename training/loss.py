@@ -41,7 +41,7 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
                 a_dist, a_seq, a_smooth, z_dist_full,
                 z_dist, z_smooth, P_smooth, z_pred, P_pred, 
                 R, Q, mask, alpha_seq,
-                cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1):
+                cfg: VAEConfig, tcfg: TrainConfig, epoch, phase=1, u_seq=None):
     """
     Computes ELBO loss:
         F = log p(x|a) + log p(a|z) + log p(z|u) - log q(a|x) - log p(z|a,u)
@@ -64,6 +64,7 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
 
     if mask is None:
         mask = torch.ones(ball_seq.shape[:2], device=ball_seq.device)
+    cur_mask = torch.ones(ball_seq.shape[:2], device=ball_seq.device)
 
     if phase == 0:
         # log p(x | a) — reconstruction
@@ -74,8 +75,7 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
             ball_seq,
             pos_weight=3,
             reduction='none'
-        ).sum(dim=(2, 3))
-        L_recon = (L_recon * mask).sum() / mask.sum()
+        ).sum(dim=(2, 3)).mean()
 
         # KL(q(a|x) || N(0,I)) — encoder regularization
         mu  = a_dist.loc
@@ -100,8 +100,7 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
             ball_seq,
             pos_weight=torch.tensor(3, device=device),
             reduction='none'
-        ).sum(dim=(2, 3))
-        L_recon = (L_recon * mask).sum() / mask.sum()
+        ).sum(dim=(2, 3)).mean()
 
         #L_recon_pred = F.binary_cross_entropy_with_logits(
         #    x_dist_pred.logits[:, :-1, :, :],
@@ -112,25 +111,28 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
         #L_recon_pred = (L_recon_pred * mask[:, 1:]).sum() / mask[:, 1:].sum()
 
         # log p(a | z) — innovation
-        L_innov = innovation_loss(a_smooth, a_seq, R, mask)
+        L_innov = innovation_loss(a_smooth, a_seq, R, cur_mask)
 
         # log p(z | u) — state prior
         L_prior = - D.MultivariateNormal(
             loc=z_pred[:, :-1, :].reshape(-1, dim_z),
             scale_tril=torch.linalg.cholesky(Q)
         ).log_prob(z_smooth[:, 1:, :].reshape(-1, dim_z))
-        mask_z = mask[:, 1:].reshape(-1)
+        mask_z = cur_mask[:, 1:].reshape(-1)
         L_prior = (L_prior * mask_z).sum() / mask_z.sum() 
         # log q(a | x) — encoder entropy
         L_entropy = - a_dist.log_prob(a_seq).sum(-1)
-        L_entropy = (L_entropy * mask).sum() / mask.sum()
+        L_entropy = (L_entropy * cur_mask).sum() / cur_mask.sum()
 
         # log p(z | a, u) — Kalman posterior 
         L_posterior = -z_dist.log_prob(z_smooth)
-        L_posterior = (L_posterior * mask).sum() / mask.sum()
+        L_posterior = (L_posterior * cur_mask).sum() / cur_mask.sum()
 
         mask_da = mask[:, 1:] * mask[:, :-1]      
         mask_bounce = mask_da[:, :-1] * mask_da[:, 1:] 
+
+        has_gravity = (u_seq.abs().sum(dim=[1, 2]) > 1e-6)  # [B]
+        no_gravity_mask = (~has_gravity).float()            # [B]
 
         da = a_seq[:, 1:, :] - a_seq[:, :-1, :]
         da_prev = da[:, :-1, :]   # [B, T-2, 2]
@@ -145,17 +147,14 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
             alpha_seq[:, 1:-1, :],
             dim=-1
         )
-        L_alpha_bounce = (
-            bounce_signal.detach() * (alpha_cos**2) * mask_bounce
-        ).sum() / (mask_bounce.sum() + 1e-8)
+        loss_per_example = (bounce_signal.detach() * (alpha_cos**2) * mask_bounce).sum(dim=1)
+        L_alpha_bounce = (loss_per_example * no_gravity_mask).sum()
 
-        # Loss
-        #missing_mask = (1 - mask)
-        #L_imputation = -D.MultivariateNormal(
-        #    loc = z_dist_full.loc.detach(),
-        #    scale_tril=z_dist_full.scale_tril.detach()
-        #).log_prob(z_smooth)
-        #L_imputation = (L_imputation * missing_mask).sum() / (missing_mask.sum()+1e-8)
+        num_no_gravity = no_gravity_mask.sum()
+        if num_no_gravity > 0:
+            L_alpha_bounce = L_alpha_bounce / num_no_gravity
+        else:
+            L_alpha_bounce = L_alpha_bounce * 0.0
         
         if phase == 1:
             loss = (0.1 * tcfg.lambda_recon * L_recon +
@@ -164,8 +163,7 @@ def compute_loss(ball_seq, x_dist_smooth, x_dist_pred,
                 (1 + 0*tcfg.lambda_prior) * L_prior -
                 #(1.0 + 0*tcfg.lambda_entropy) * L_entropy  -
                 (1.0 + 0*tcfg.lambda_posterior) * L_posterior + 
-                0.15 * L_alpha_bounce
-            #    + L_imputation * 0.3
+                0.3 * L_alpha_bounce
             )
         else:
             loss =(

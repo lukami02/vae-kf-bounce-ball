@@ -4,11 +4,12 @@ from dataclasses import dataclass
 class SimulationConfig:
     # simulation 
     size: tuple[int, int] = (32, 32)       # (H, W)
-    gravity: bool = False                  # enable gravity
-    seed: int = 12                         # RNG seed
+    gravity: bool = True                   # enable gravity
+    gravity_chance: float = 0.5            # Probability of triggering gravity
+    seed: int = 42                         # RNG seed
     T: int = 40                            # number of frames per episode
     substeps: int = 4                      # number of physics substeps per frame
-    episodes: int = 24000                   # number of episodes to generate
+    episodes: int = 8000                  # number of episodes to generate
     data_dir:  str = "dataset/"            # directory to save generated .npy files
 
     # ball
@@ -22,7 +23,7 @@ class SimulationConfig:
     # obstacles 
     obstacle_min_scale: float = 0.15       # min obstacle size proportion
     obstacle_max_scale: float = 0.30       # max obstacle size proportion
-    num_obstacles: int = 0                 # default number of obstacles
+    num_obstacles: int = 2                 # default number of obstacles
 
     # physics 
-    gravity_strength_scale: float = 0.002  # gravity strength proportion
+    gravity_strength_scale: float = 0.003  # gravity strength proportion

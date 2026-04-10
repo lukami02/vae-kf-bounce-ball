@@ -87,7 +87,7 @@ class BouncingBallSim:
 
         self.obstacles = np.array(obs, dtype=np.int32)
 
-    def step(self, pos, vel):
+    def step(self, pos, vel, apply_gravity=False):
         """
         Update position and velocity using substeps for more stable collision physics.
         """
@@ -95,7 +95,7 @@ class BouncingBallSim:
 
         for _ in range(self.cfg.substeps):
             # Apply gravity to actual velocity
-            if self.gravity:
+            if apply_gravity:
                 vel[1] += self.gravity_strength * dt
 
             pos += vel * dt
@@ -217,6 +217,7 @@ class BouncingBallSim:
         Generates a sequence of the simulation.
         """
         T = self.cfg.T
+        apply_gravity = self.gravity and self.rng.random() < self.cfg.gravity_chance
         pos = self.spawn_ball()
 
         angle = self.rng.uniform(0, 2*np.pi)
@@ -230,13 +231,16 @@ class BouncingBallSim:
         for _ in range(T):
             ball = self.render_ball(pos)
             balls.append(ball)
-            pos, vel = self.step(pos, vel)
+            pos, vel = self.step(pos, vel, apply_gravity)
 
         balls = np.stack(balls)
 
         frames = np.concatenate([balls,], axis=0)
 
-        return frames, obstacle_frame
+        control_val = 1.0 if apply_gravity else 0.0
+        control_signal = np.full((T, 1), control_val, dtype=np.float32)
+
+        return frames, obstacle_frame, control_signal
 
     def generate_dataset(self, seed=None):
         """
@@ -247,18 +251,20 @@ class BouncingBallSim:
 
         ball_data = np.zeros((self.cfg.episodes, self.cfg.T, self.H, self.W), dtype=np.float32)
         obstacle_data = np.zeros((self.cfg.episodes, self.H, self.W), dtype=np.float32)
+        control_data = np.zeros((self.cfg.episodes, self.cfg.T, 1), dtype=np.float32)
 
         for i in range(self.cfg.episodes):
             self.random_obstacles()
-            frames, obstacle_frame = self.generate_episode()
+            frames, obstacle_frame, ctrl_signal = self.generate_episode()
 
             ball_data[i] = frames
             obstacle_data[i] = obstacle_frame 
+            control_data[i] = ctrl_signal
 
             if i % 1000 == 0:
                 print(f"Generated episode {i+1}/{self.cfg.episodes}")
 
-        return ball_data, obstacle_data
+        return ball_data, obstacle_data, control_data
     
 if __name__ == "__main__":
 

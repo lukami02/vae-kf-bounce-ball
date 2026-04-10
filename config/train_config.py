@@ -9,9 +9,9 @@ class TrainConfig:
     epochs: int = 100
     vae_pretrain_epochs: int = 20
     batch_size: int = 128
-    learning_rate: float = 5e-3
+    learning_rate: float = 5e-4
     grad_clip: float = 1.0
-    seed: int = 15
+    seed: int = 10
     val_split:  float = 0.1    
     test_split: float = 0.01
     pos_weight: float = 6.5      # binary cross entropy positive class weight

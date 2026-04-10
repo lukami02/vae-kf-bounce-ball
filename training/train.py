@@ -57,10 +57,9 @@ def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.
 def get_optimizer(model, tcfg: TrainConfig, phase=0):
     if isinstance(model, KVAE):
         param_groups = [
-            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate*0.05},
-            {"params": model.obstacle_encoder.proj_fc.parameters(), "lr": tcfg.learning_rate},
-            {"params": model.obstacle_encoder.proj_cnn.parameters(), "lr": tcfg.learning_rate},
-            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate*0.05},
+            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate*0.1},
+            {"params": model.obstacle_encoder.fc_proj.parameters(), "lr": tcfg.learning_rate},
+            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate},
             {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
             {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate},
             {"params": [model.A_matrices],                  "lr": tcfg.learning_rate },
@@ -68,7 +67,7 @@ def get_optimizer(model, tcfg: TrainConfig, phase=0):
         ]
         if model.B_matrices is not None:
             param_groups.append(
-                {"params": [model.B_matrices], "lr": tcfg.learning_rate * 0.1}
+                {"params": [model.B_matrices], "lr": tcfg.learning_rate}
             )
     else:
         param_groups = [{"params": model.parameters(), "lr": tcfg.learning_rate}]
@@ -119,13 +118,14 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device, phase=
         else:
             ball_seq, obstacle_img, u_seq = batch
         B, T, _, _ = ball_seq.shape
-        if epoch < 61:
-            mask = make_mask(B, T, device, 0, 0.2, randomize_start=True)
-        #elif epoch < 120:
+        if epoch < 40:
+            mask = make_mask(B, T, device, 0, 0, randomize_start=True)
+        #elif epoch < 80:
         #    mask = make_mask(B, T, device, 0, 0.3, randomize_start=True)
-        else:
-            steps = min(int(10*(epoch-60) / 100), 10)
-            mask = make_mask(B, T, device, steps, 0.1, randomize_start=True)
+        #elif epoch < 150:
+        #    steps = min(int(10*(epoch-80) / 50), 10)
+        #    mask = make_mask(B, T, device, steps, 0.1, randomize_start=True)
+        #else: mask = make_mask(B, T, device, 8, 0.1, randomize_start=False)
 
         ball_seq     = ball_seq.to(device)
         obstacle_img = obstacle_img.to(device)
@@ -164,7 +164,8 @@ def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device, phase=
             cfg        = cfg,
             tcfg       = tcfg,
             epoch      = epoch,
-            phase      = phase
+            phase      = phase,
+            u_seq  =  u_seq
         )
         
         optimizer.zero_grad()
@@ -293,7 +294,8 @@ def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
             mask=None,
             cfg        = cfg,
             tcfg       = tcfg,
-            epoch      = epoch
+            epoch      = epoch,
+            u_seq=u_seq
         )
 
         for k, v in terms.items():
@@ -351,16 +353,12 @@ def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     logger.info("=" * 60)
     logger.info("Phase 1: VAE pretraining")
     logger.info("=" * 60)
-
-    # freeze all
-    for params in model.ball_encoder.parameters():
+    for params in model.parameters():
         params.requires_grad = False
     for params in model.decoder.parameters():
-        params.requires_grad = False
+        params.requires_grad = True
 
-
-
-    for epoch in range(1, 201):
+    for epoch in range(1, 31):
         B = tcfg.batch_size
         T = sim_cfg.T
 
@@ -533,8 +531,8 @@ if __name__ == "__main__":
         model.load_state_dict(ckpt["model"])
         logger.info(f"Checkpoint loaded: {args.checkpoint}")
 
-    train_dataset = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="train")
-    val_dataset   = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="val")
+    train_dataset = BallDataset(sim_cfg=sim_cfg, cfg=cfg, tcfg=tcfg, split="train")
+    val_dataset   = BallDataset(sim_cfg=sim_cfg, cfg=cfg, tcfg=tcfg, split="val")
 
     train_loader = DataLoader(train_dataset, batch_size=tcfg.batch_size, shuffle=True,  num_workers=4)
     val_loader   = DataLoader(val_dataset,   batch_size=tcfg.batch_size, shuffle=False, num_workers=4)
