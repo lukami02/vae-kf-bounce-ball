@@ -52,26 +52,26 @@ class KalmanFilter(nn.Module):
         Perform Kalman filtering to compute filtered state estimates.
 
         a_seq:       [B, T, dim_a]        — observation sequence (encoder outputs)
-        alpha_net:   nn.Module            — alpha network (mixture weights)
+        alpha_net:   nn.Module            — mixture weight network
         h_obs:       [B, dim_h]           — static obstacle context
-        A_matrices:  [K, dim_z, dim_z]    — state transition matrices
+        A_matrices:  [K, dim_z, dim_z]    — state transition matrices (one per mixture component)
         C_matrices:  [K, dim_a, dim_z]    — observation matrices
         B_matrices:  [K, dim_z, dim_u]    — control matrices (optional)
         u_seq:       [B, T, dim_u]        — control inputs (optional)
-        mask:        [B, T]               — mask for valid timesteps
-        epoch:       int                  — current training epoch
+        mask:        [B, T]               — binary mask for valid timesteps
+        epoch:       int                  — current training epoch (controls temperature/burn-in)
 
         z_filt:      [B, T, dim_z]        — filtered latent states
         P_filt:      [B, T, dim_z, dim_z] — filtered covariances
-        z_pred:      [B, T, dim_z]        — predicted states
-        a_filt:      [B, T, dim_a]        — reconstructed observations (filtered)
-        a_pred:      [B, T, dim_a]        — predicted observations
+        z_pred:      [B, T, dim_z]        — predicted states (prior to update)
+        a_filt:      [B, T, dim_a]        — reconstructed observations from filtered states
+        a_pred:      [B, T, dim_a]        — predicted observations from predicted states
         P_pred:      [B, T, dim_z, dim_z] — predicted covariances
-        alpha_seq:   [B, T, K]            — mixture weights
-        A_list:      [B, T, dim_z, dim_z] — selected transition matrices
-        B_list:      [B, T, dim_z, dim_u] or None
-        C_list:      [B, T, dim_a, dim_z]
-        z_dist:      MultivariateNormal([B, T, dim_z])
+        alpha_seq:   [B, T, K]            — mixture weights over time
+        A_list:      [B, T, dim_z, dim_z] — effective transition matrices
+        B_list:      [B, T, dim_z, dim_u] — effective control matrices (or None)
+        C_list:      [B, T, dim_a, dim_z] — effective observation matrices
+        z_dist:      MultivariateNormal   — filtered state distribution
         S_pred:      [B, T, dim_a, dim_a] — innovation covariance
         """
         B, T, dim_a = a_seq.shape
@@ -232,22 +232,22 @@ class KalmanFilter(nn.Module):
         """
         Rauch-Tung-Striebel smoother for computing smoothed state estimates.
 
-        z_filt_list:  [B, T, dim_z]        filtered means
-        P_filt_list:  [B, T, dim_z, dim_z] filtered covariances
-        z_pred_list:  [B, T, dim_z]        predicted means
-        P_pred_list:  [B, T, dim_z, dim_z] predicted covariances
-        A_list:       [B, T, dim_z, dim_z] effective transition matrices
-        B_list:       [B, T, dim_z, dim_u] effective control matrices (or None)
-        C_list:       [B, T, dim_a, dim_z] effective observation matrices
-        u_seq:        [B, T, dim_u]        control inputs (or None)
+        z_filt_list:  [B, T, dim_z]        — filtered means
+        P_filt_list:  [B, T, dim_z, dim_z] — filtered covariances
+        z_pred_list:  [B, T, dim_z]        — predicted means
+        P_pred_list:  [B, T, dim_z, dim_z] — predicted covariances
+        A_list:       [B, T, dim_z, dim_z] — effective transition matrices
+        B_list:       [B, T, dim_z, dim_u] — effective control matrices (or None)
+        C_list:       [B, T, dim_a, dim_z] — effective observation matrices
+        u_seq:        [B, T, dim_u]        — control inputs (or None)
 
-        z_smooth:       [B, T, dim_z]        smoothed states (sampled if training)
-        P_smooth:       [B, T, dim_z, dim_z] smoothed covariances
-        z_pred_smooth:  [B, T, dim_z]        one-step predictions from smoothed states
-        P_pred_smooth:  [B, T, dim_z, dim_z] predicted covariances from smoothed states
-        a_smooth:       [B, T, dim_a]        reconstructed observations from smoothed states
-        a_pred_smooth:  [B, T, dim_a]        predicted observations from smoothed states
-        z_dist:         MultivariateNormal   smoothed state distribution
+        z_smooth:       [B, T, dim_z]        — smoothed states (sampled if training)
+        P_smooth:       [B, T, dim_z, dim_z] — smoothed covariances
+        z_pred_smooth:  [B, T, dim_z]        — one-step predictions from smoothed states
+        P_pred_smooth:  [B, T, dim_z, dim_z] — predicted covariances from smoothed states
+        a_smooth:       [B, T, dim_a]        — reconstructed observations from smoothed states
+        a_pred_smooth:  [B, T, dim_a]        — predicted observations from smoothed states
+        z_dist:         MultivariateNormal   — smoothed state distribution
         """
 
         B, T, _ = z_filt_list.shape
@@ -334,24 +334,24 @@ class KalmanFilter(nn.Module):
 
     def forward(self, a_seq, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None, epoch=100):
         """
-        a_seq:       [B, T, dim_a]     encoder output sequence
-        alpha_net:   AlphaNetwork      mixture weight network
-        h_obs:       [B, dim_obstacle] static obstacle context
-        A_matrices:  [K, dim_z, dim_z] transition matrix bank
-        C_matrices:  [K, dim_a, dim_z] observation matrix bank
-        B_matrices:  [K, dim_z, dim_u] control matrix bank (optional)
-        u_seq:       [B, T, dim_u]     control input sequence (optional)
-        mask:        [B, T]            validity mask
-        epoch:       int               current training epoch
+        a_seq:       [B, T, dim_a]     — encoder output sequence
+        alpha_net:   AlphaNetwork      — mixture weight network
+        h_obs:       [B, dim_obstacle] — static obstacle context
+        A_matrices:  [K, dim_z, dim_z] — transition matrix bank
+        C_matrices:  [K, dim_a, dim_z] — observation matrix bank
+        B_matrices:  [K, dim_z, dim_u] — control matrix bank (optional)
+        u_seq:       [B, T, dim_u]     — control input sequence (optional)
+        mask:        [B, T]            — validity mask
+        epoch:       int               — current training epoch
 
-        z_smooth:       [B, T, dim_z]        smoothed latent states
-        P_smooth:       [B, T, dim_z, dim_z] smoothed covariances
-        z_dist:         MultivariateNormal   smoothed state distribution
-        z_pred_smooth:  [B, T, dim_z]        one-step predictions from smoothed states
-        P_pred_smooth:  [B, T, dim_z, dim_z] predicted covariances
-        a_smooth:       [B, T, dim_a]        reconstructed observations
-        a_pred_smooth:  [B, T, dim_a]        predicted observations
-        alpha_seq:      [B, T, K]            mixture weights over time
+        z_smooth:       [B, T, dim_z]        — smoothed latent states
+        P_smooth:       [B, T, dim_z, dim_z] — smoothed covariances
+        z_dist:         MultivariateNormal   — smoothed state distribution
+        z_pred_smooth:  [B, T, dim_z]        — one-step predictions from smoothed states
+        P_pred_smooth:  [B, T, dim_z, dim_z] — predicted covariances
+        a_smooth:       [B, T, dim_a]        — reconstructed observations
+        a_pred_smooth:  [B, T, dim_a]        — predicted observations
+        alpha_seq:      [B, T, K]            — mixture weights over time
         """
 
         # Kalman filter
