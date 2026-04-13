@@ -17,7 +17,7 @@ class KVAE(BaseVAE):
         super().__init__(cfg, sim_cfg, tcfg)
 
         self.alpha_net = AlphaNetwork(cfg)
-        self.kalman = KalmanFilter(cfg)
+        self.kalman = KalmanFilter(cfg, tcfg)
 
         # State transition matrices [K, dim_z, dim_z]
         self.A_matrices = nn.Parameter(
@@ -74,7 +74,7 @@ class KVAE(BaseVAE):
             a_seq = a_dist.mean
         
         # Kalman filter
-        z_smooth, P_smooth, z_dist, z_pred, P_pred, a_smooth, a_pred_smooth, alpha_seq, S_pred = self.kalman(
+        z_smooth, P_smooth, z_dist, z_pred, P_pred, a_smooth, a_pred_smooth, alpha_seq = self.kalman(
             a_seq       = a_seq,
             alpha_net   = self.alpha_net,
             h_obs       = h_obs,
