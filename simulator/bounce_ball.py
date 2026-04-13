@@ -32,18 +32,62 @@ class BouncingBallSim:
         Obstacle generation
         """
         obs = []
-        for _ in range(self.rng.integers(self.cfg.num_obstacles+1)):
-            w = self.rng.integers(self.obstacle_min, self.obstacle_max)
-            h = self.rng.integers(self.obstacle_min, self.obstacle_max)
 
-            x = self.rng.integers(0, self.W - w)
-            y = self.rng.integers(0, self.H - h)
+        min_gap = 6*self.r
 
-            obs.append([x, y, x+w, y+h])
+        n = self.rng.integers(self.cfg.num_obstacles+1)
+        walls = ['left', 'right', 'top', 'bottom']
+        last_wall = None
+
+        opposite = {
+            'left': 'right',
+            'right': 'left',
+            'top': 'bottom',
+            'bottom': 'top'
+        }
+
+        for _ in range(n):
+
+            if last_wall is None:
+                wall = walls[self.rng.integers(len(walls))]
+            else:
+                wall = opposite[last_wall]
+
+            depth = self.rng.integers(self.obstacle_min, self.obstacle_max)
+
+            if wall in ('left', 'right'):
+                h = self.rng.integers(self.obstacle_min, self.obstacle_max)
+                y = self.rng.integers(self.r *2, self.H - self.r*2 - h)
+
+                if wall == 'left':
+                    x1, y1, x2, y2 = 0, y, depth, y+h
+                else:
+                    x1, y1, x2, y2 = self.W - depth, y, self.W, y+h
+                
+                if wall == 'left' and x2 > self.W - min_gap:
+                    continue
+                if wall == 'right' and x1 < min_gap:
+                    continue
+
+            else:
+                w = self.rng.integers(self.obstacle_min, self.obstacle_max)
+                x = self.rng.integers(self.r*2, self.W - self.r*2 - w)
+
+                if wall == 'top':
+                    x1, y1, x2, y2 = x, 0, x+w, depth
+                else:
+                    x1, y1, x2, y2 = x, self.H - depth, x+w, self.H
+
+                if wall == 'top' and y2 > self.H - min_gap:
+                    continue
+                if wall == 'bottom' and y1 < min_gap:
+                    continue
+            obs.append((x1,y1,x2,y2))
+            last_wall = wall
 
         self.obstacles = np.array(obs, dtype=np.int32)
 
-    def step(self, pos, vel):
+    def step(self, pos, vel, apply_gravity=False):
         """
         Update position and velocity using substeps for more stable collision physics.
         """
@@ -51,7 +95,7 @@ class BouncingBallSim:
 
         for _ in range(self.cfg.substeps):
             # Apply gravity to actual velocity
-            if self.gravity:
+            if apply_gravity:
                 vel[1] += self.gravity_strength * dt
 
             pos += vel * dt
@@ -78,19 +122,31 @@ class BouncingBallSim:
 
                 dx = pos[0] - cx
                 dy = pos[1] - cy
+                dist_sq = dx*dx + dy*dy
 
-                if dx*dx + dy*dy < self.r*self.r:
-                    pen_x = self.r - abs(dx)
-                    pen_y = self.r - abs(dy)
+                if dist_sq >= self.r*self.r:
+                    continue
+                
+                overlap_x = (x2 - x1) / 2 + self.r - abs(pos[0] - (x1 + x2) / 2)
+                overlap_y = (y2 - y1) / 2 + self.r - abs(pos[1] - (y1 + y2) / 2)
 
-                    if pen_x < pen_y:
-                        vel[0] *= -1
-                        if dx > 0: pos[0] = cx + self.r
-                        else: pos[0] = cx - self.r
+                if overlap_x <= 0 or overlap_y <= 0:
+                    continue
+
+                if overlap_x < overlap_y:
+                    # Resolve along X — push ball horizontally
+                    vel[0] *= -1
+                    if pos[0] < (x1 + x2) / 2:
+                        pos[0] = x1 - self.r
                     else:
-                        vel[1] *= -1
-                        if dy > 0: pos[1] = cy + self.r
-                        else: pos[1] = cy - self.r
+                        pos[0] = x2 + self.r
+                else:
+                    # Resolve along Y — push ball vertically
+                    vel[1] *= -1
+                    if pos[1] < (y1 + y2) / 2:
+                        pos[1] = y1 - self.r
+                    else:
+                        pos[1] = y2 + self.r
         return pos, vel
 
     def render_obstacles(self):
@@ -131,8 +187,10 @@ class BouncingBallSim:
 
             img[y_min:y_max,x_min:x_max] = g
         else:
-            r = 1.5*self.r
-            cv2.circle(img, center=(int(x0), int(y0)), radius=int(r), color=1.0, thickness=-1)
+            r = self.r + 0.2
+            iy, ix = np.ogrid[0:self.H, 0:self.W]
+            mask = (ix - int(x0)) ** 2 + (iy - int(y0)) ** 2 <= r * r
+            img[mask] = 1.0
         return img
     
     def spawn_ball(self):
@@ -159,6 +217,7 @@ class BouncingBallSim:
         Generates a sequence of the simulation.
         """
         T = self.cfg.T
+        apply_gravity = self.gravity and self.rng.random() < self.cfg.gravity_chance
         pos = self.spawn_ball()
 
         angle = self.rng.uniform(0, 2*np.pi)
@@ -172,36 +231,40 @@ class BouncingBallSim:
         for _ in range(T):
             ball = self.render_ball(pos)
             balls.append(ball)
-            pos, vel = self.step(pos, vel)
+            pos, vel = self.step(pos, vel, apply_gravity)
 
         balls = np.stack(balls)
 
-        # motion channel
-        #motion = np.zeros_like(balls)
-        #motion[1:] = balls[1:] - balls[:-1]
-
         frames = np.concatenate([balls,], axis=0)
 
-        return frames, obstacle_frame
+        control_val = 1.0 if apply_gravity else 0.0
+        control_signal = np.full((T, 1), control_val, dtype=np.float32)
 
-    def generate_dataset(self):
+        return frames, obstacle_frame, control_signal
+
+    def generate_dataset(self, seed=None):
         """
         Creates a large-scale dataset of physics simulations.
         """
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+
         ball_data = np.zeros((self.cfg.episodes, self.cfg.T, self.H, self.W), dtype=np.float32)
         obstacle_data = np.zeros((self.cfg.episodes, self.H, self.W), dtype=np.float32)
+        control_data = np.zeros((self.cfg.episodes, self.cfg.T, 1), dtype=np.float32)
 
         for i in range(self.cfg.episodes):
             self.random_obstacles()
-            frames, obstacle_frame = self.generate_episode()
+            frames, obstacle_frame, ctrl_signal = self.generate_episode()
 
             ball_data[i] = frames
             obstacle_data[i] = obstacle_frame 
+            control_data[i] = ctrl_signal
 
             if i % 1000 == 0:
                 print(f"Generated episode {i+1}/{self.cfg.episodes}")
 
-        return ball_data, obstacle_data
+        return ball_data, obstacle_data, control_data
     
 if __name__ == "__main__":
 
