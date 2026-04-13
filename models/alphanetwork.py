@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 import sys
 sys.path.append("..")
@@ -9,59 +10,51 @@ class AlphaNetwork(nn.Module):
     """
     Computes mixing weights alpha_k for matrix selection.
     """
-    def __init__(self, cfg: VAEConfig):
+    def __init__(self, cfg: VAEConfig, obstacle=True):
         super().__init__()
         self.cfg = cfg
-        
-        self.z_proj = nn.Linear(cfg.dim_z, cfg.alpha_units)
-        
-        # Attention layers
-        self.query_layer = nn.Linear(cfg.alpha_units, cfg.alpha_units)
-        self.key_layer = nn.Linear(cfg.alpha_units, cfg.alpha_units)
-        self.value_layer = nn.Linear(cfg.alpha_units, cfg.alpha_units)
+        self.obstacle = obstacle
 
-        self.var_proj = nn.Sequential(
-            nn.Linear(cfg.dim_a + cfg.dim_z, cfg.alpha_units),
-            nn.Tanh()
-        )
+        # Calculate total input dimension
+        input_dim = cfg.dim_a
+        if obstacle: input_dim += cfg.gru_hidden_dim
+        if cfg.dim_u > 0: input_dim += cfg.dim_u
 
-        self.gru = nn.GRUCell(cfg.alpha_units * 2 + (cfg.dim_u if cfg.dim_u > 0 else 0), cfg.alpha_units)
+        # Network layers
+        self.var_proj = nn.Linear(input_dim, cfg.gru_hidden_dim)
+        self.fc_alpha = nn.Linear(cfg.gru_hidden_dim, cfg.num_matrices) 
+        self.gru = nn.GRUCell(cfg.gru_hidden_dim, cfg.gru_hidden_dim)
 
-        self.fc_alpha = nn.Sequential(
-            nn.Linear(cfg.alpha_units, cfg.alpha_units // 2),
-            nn.Tanh(),
-            nn.Linear(cfg.alpha_units // 2, cfg.num_matrices)
-        )
+    def forward(self, a_k, h_obs_features, state=None, u_k=None):
+        """
+        a_k:            [B, dim_a]          — Current observation
+        h_obs_features: [B, gru_hidden_dim] — Encoded obstacle
+        state:          [B, gru_hidden_dim] — Previous GRU hidden state
+        u_k:            [B, dim_u]          — Control input (optional)
 
-    def forward(self, a_k, h_obs_features, z_filt, state=None, u_k=None, temp=0.1):
-        # h_obs_features [B, N, alpha_units] 
+        alpha:          [B, num_matrices]   — Mixing weights
+        state:          [B, gru_hidden_dim] — Updated GRU hidden state
+        """
 
         if self.cfg.num_matrices == 1:
             return torch.ones(a_k.shape[0], 1, device=a_k.device), state
 
-        z_q = self.z_proj(z_filt) # [B, alpha_units]
-        
-        Q = self.query_layer(z_q).unsqueeze(1) # [B, 1, units]
-        K = self.key_layer(h_obs_features)     # [B, N, units]
-        V = self.value_layer(h_obs_features)   # [B, N, units]
-        
-        # Scaled dot-product
-        scores = torch.bmm(Q, K.transpose(1, 2)) / math.sqrt(self.cfg.alpha_units)
-        attn_weights = torch.softmax(scores, dim=-1)    # [B, 1, N]
-        context = torch.bmm(attn_weights, V).squeeze(1) # [B, alpha_units]
+        # Prepare input features
+        x = a_k
+        if self.obstacle:
+            x = torch.cat([x, h_obs_features], dim=-1)  # [B, dim_a + hidden_dim]
+        if self.cfg.dim_u:
+            x = torch.cat([x, u_k], dim=-1)             # [B, dim_a + hidden_dim + dim_u]
 
-        var_input = self.var_proj(torch.cat([a_k, z_filt], dim=-1))
-        inputs = torch.cat([var_input, context], dim=-1)
-        
-        if self.cfg.dim_u > 0 and u_k is not None:
-            inputs = torch.cat([inputs, u_k], dim=-1)
+        # Map to hidden dimension and update recurrence
+        var_input = F.relu(self.var_proj(x))            # [B, hidden_dim]
+        state = self.gru(var_input, state)              # [B, gru_hidden_dim]
 
-        state = self.gru(inputs, state)
-        logits = self.fc_alpha(state)
-
-        alpha = torch.softmax(logits / temp, dim=-1)
+        # Output alpha weights via softmax
+        logits = self.fc_alpha(state)                   # [B, num_matrices]
+        alpha = torch.softmax(logits, dim=-1)           # [B, num_matrices]
             
         return alpha, state
     
     def init_state(self, batch_size, device):
-        return torch.zeros(batch_size, self.cfg.alpha_units, device=device)
+        return torch.zeros(batch_size, self.cfg.gru_hidden_dim, device=device)
