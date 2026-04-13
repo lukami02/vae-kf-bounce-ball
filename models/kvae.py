@@ -4,6 +4,7 @@ import sys
 sys.path.append("..")
 from config.vae_config import VAEConfig
 from config.simulation_config import SimulationConfig
+from config.train_config import TrainConfig
 from models.base_vae import BaseVAE
 from models.encoder import BallEncoder, ObstacleEncoder
 from models.decoder import BallDecoder
@@ -12,11 +13,11 @@ from models.alphanetwork import AlphaNetwork
 
 
 class KVAE(BaseVAE):
-    def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig):
-        super().__init__(cfg, sim_cfg)
+    def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig, tcfg: TrainConfig):
+        super().__init__(cfg, sim_cfg, tcfg)
 
-        self.alpha_net        = AlphaNetwork(cfg)
-        self.kalman           = KalmanFilter(cfg)
+        self.alpha_net = AlphaNetwork(cfg)
+        self.kalman = KalmanFilter(cfg)
 
         # State transition matrices [K, dim_z, dim_z]
         self.A_matrices = nn.Parameter(
@@ -62,7 +63,7 @@ class KVAE(BaseVAE):
         x_dist_encoder:[B, T, H, W]          — reconstruction from encoder samples
         x_dist_smooth: [B, T, H, W]          — reconstruction from smoothed latents
         """
-        
+
         # Encode
         a_dist = self.ball_encoder(ball_seq)                          
         h_obs = self.obstacle_encoder(obstacle_img.unsqueeze(1))  # [B, dim_obstacle]

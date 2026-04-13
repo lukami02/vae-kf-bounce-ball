@@ -4,6 +4,7 @@ import sys
 sys.path.append("..")
 from config.vae_config import VAEConfig
 from config.simulation_config import SimulationConfig
+from config.train_config import TrainConfig
 from models.encoder import BallEncoder, ObstacleEncoder
 from models.decoder import BallDecoder
 
@@ -12,10 +13,11 @@ class BaseVAE(nn.Module):
     """
     Base class for VAE models. Contains shared encoder and decoder.
     """
-    def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig):
+    def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig, tcfg: TrainConfig):
         super().__init__()
         self.cfg     = cfg
         self.sim_cfg = sim_cfg
+        self.tcfg    = tcfg
 
         self.ball_encoder = BallEncoder(cfg, sim_cfg)
         self.obstacle_encoder = ObstacleEncoder(cfg, sim_cfg, self.ball_encoder)
