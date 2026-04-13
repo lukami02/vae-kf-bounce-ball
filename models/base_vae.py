@@ -18,7 +18,7 @@ class BaseVAE(nn.Module):
         self.sim_cfg = sim_cfg
 
         self.ball_encoder = BallEncoder(cfg, sim_cfg)
-        self.obstacle_encoder = ObstacleEncoder(cfg, sim_cfg)
+        self.obstacle_encoder = ObstacleEncoder(cfg, sim_cfg, self.ball_encoder)
         self.decoder = BallDecoder(cfg, sim_cfg)
 
     def encode(self, ball_seq, obstacle_img):

@@ -11,7 +11,7 @@ from config.simulation_config import SimulationConfig
 
 class BallEncoder(nn.Module):
     """
-    Encodes ball image sequence + obstacle image into latent distribution.
+    Encodes ball image sequence into latent distribution.
     """
 
     def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig):
@@ -19,84 +19,87 @@ class BallEncoder(nn.Module):
         self.cfg = vae_cfg
 
         # input channels
-        channels = [2] + vae_cfg.encoder_ball_channels
+        channels = [1] + vae_cfg.encoder_ball_channels
 
+        # Network layers
         layers = []
         for i in range(len(channels) - 1):
             layers += [
-                nn.Conv2d(channels[i], channels[i + 1], 3, stride=1, padding=1),
-                nn.BatchNorm2d(channels[i + 1]),
+                nn.Conv2d(channels[i], channels[i + 1], 3, stride=2, padding=1),
                 vae_cfg.enc_activation(),
-                nn.MaxPool2d(2, 2)
             ]
 
         self.cnn = nn.Sequential(*layers)
 
-        # compute flat size
+        # Calculate flattened size after CNN
         self._flat_size = self._get_flat_size(sim_cfg.size)
 
+        # Output heads for distribution parameters
         self.fc_mu = nn.Linear(self._flat_size, vae_cfg.dim_a)
         self.fc_var = nn.Linear(self._flat_size, vae_cfg.dim_a)
 
     def _get_flat_size(self, image_size):
-        dummy = torch.zeros(1, 2, image_size[0], image_size[1])
-        out = self.cnn(dummy)
+        dummy = torch.zeros(1, 1, image_size[0], image_size[1])
+        with torch.no_grad():
+            out = self.cnn(dummy)
         return out.view(1, -1).shape[1]
 
-    def reparametrize(self, mu, var):
-        if self.training:
-            std = torch.sqrt(var + 1e-8)
-            eps = torch.randn_like(std)
-            return mu + eps * std
-        return mu
-
-    def forward(self, x, obs_img):
+    def forward(self, x):
         """
-        x: [B, T, H, W]
-        obs_img: [B, 1, H, W]
+        x: [B, T, H, W] — Sequence of grayscale images
+        
+        dist: torch.distributions.Normal — Latent distribution with shape [B, T, dim_a]
         """
         B, T, H, W = x.shape
+        x_flat = x.view(B * T, 1, H, W)
 
-        obs_seq = obs_img.unsqueeze(1).expand(-1, T, -1, -1, -1)  # [B,T,1,H,W]
-
-        # add channel dim to x
-        x = x.unsqueeze(2)                  # [B,T,1,H,W]
-        x = torch.cat([x, obs_seq], dim=2)  # [B,T,2,H,W]
-        x_flat = x.view(B * T, 2, H, W)
         enc = self.cnn(x_flat)
         enc = enc.view(B * T, -1)
 
+        # Compute Mean and Standard Deviation
         a_mu = self.fc_mu(enc)
-        a_std = F.softplus(self.fc_var(enc)) + 1e-6
-        #a = self.reparametrize(a_mu, a_var)
+        a_std = self.cfg.Q_std * torch.sigmoid(self.fc_var(enc)) + 1e-6
+
         a_mu = a_mu.view(B, T, self.cfg.dim_a)
         a_std = a_std.view(B, T, self.cfg.dim_a)
+
         return D.Normal(loc=a_mu, scale=a_std)
 
 class ObstacleEncoder(nn.Module):
     """
     Encodes static obstacle image into context vector.
     """
-    def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig):
+    def __init__(self, vae_cfg: VAEConfig, sim_cfg: SimulationConfig, ball_encoder: BallEncoder):
         super().__init__()
-        channels = [1] + vae_cfg.encoder_obstacle_channels
-        layers = []
-        for i in range(len(channels)-1):
-            layers += [
-                nn.Conv2d(channels[i], channels[i + 1], 3, stride=1, padding=1),
-                nn.BatchNorm2d(channels[i + 1]),
-                vae_cfg.enc_activation(),
-                nn.MaxPool2d(2, 2)
-            ]
-        self.cnn = nn.Sequential(*layers)
-        
-        self.feature_proj = nn.Conv2d(vae_cfg.encoder_obstacle_channels[-1], vae_cfg.alpha_units, 1)
+
+        # Share the CNN backbone with ball_encoder
+        self.cnn = ball_encoder.cnn
+
+        # Calculate flattened size after CNN
+        self._flat_size = self._get_flat_size(sim_cfg.size)
+
+        # Project visual features to GRU hidden dimension
+        self.feature_proj = nn.Linear( self._flat_size, vae_cfg.gru_hidden_dim)
+
+    def _get_flat_size(self, image_size):
+        dummy = torch.zeros(1, 1, image_size[0], image_size[1])
+        with torch.no_grad():
+            out = self.cnn(dummy)
+        return out.view(1, -1).shape[1]
 
     def forward(self, obs_img):
-        # obs_img: [B, 1, H, W]
-        features = self.cnn(obs_img) # [B, C, H', W']
-        features = self.feature_proj(features) # [B, alpha_units, H', W']
+        """
+        obs_img:  [B, 1, H, W] — Static image of obstacles
+
+        features: [B, gru_hidden_dim] — Latent context vector
+        """
+        B = obs_img.shape[0]
         
-        B, C, H, W = features.shape
-        features = features.view(B, C, -1).transpose(1, 2)
+        # Detach ensures CNN is only trained via BallEncoder
+        features = self.cnn(obs_img).detach() # [B, C, H', W']
+
+        # Flatten and project to hidden space
+        features = features.view(B, -1)
+        features = self.feature_proj(features) 
+
         return features
