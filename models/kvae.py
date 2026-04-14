@@ -45,7 +45,7 @@ class KVAE(BaseVAE):
 
         a_dist:        Normal([B, T, dim_a]) — encoder distribution over latent observations
         a_seq:         [B, T, dim_a]         — sampled latent observations
-        h_obs:         [B, gru_hidden_dim]   — obstacle context vector
+        h_obs:         [B, dim_obstacle]     — obstacle context vector
 
         A_matrices:    [K, dim_z, dim_z]     — state transition matrices
         B_matrices:    [K, dim_z, dim_u]     — control matrices
@@ -87,16 +87,15 @@ class KVAE(BaseVAE):
         )
 
         # Decode
-        x_dist_encoder = self.decode(a_seq)     # [B, T, H, W]
-        x_dist_smooth = self.decode(a_smooth)   # [B, T, H, W]
+        x_dist_smooth = self.decode(a_smooth)    # [B, T, H, W]
+        x_dist_pred = self.decode(a_pred_smooth) # [B, T, H, W]
 
         return (
-            x_dist_smooth, x_dist_encoder,
+            x_dist_smooth,
             a_dist, a_seq, a_smooth, a_pred_smooth,
-            z_dist, z_smooth, P_smooth, z_pred, P_pred,
+            z_dist, z_smooth, z_pred,
             self.kalman.R, self.kalman.Q, alpha_seq
         )
-
 
 if __name__ == "__main__":
 
