@@ -17,7 +17,7 @@ class AlphaNetwork(nn.Module):
 
         # Calculate total input dimension
         input_dim = cfg.dim_a
-        if obstacle: input_dim += cfg.gru_hidden_dim
+        if obstacle: input_dim += cfg.dim_obstacle
         if cfg.dim_u > 0: input_dim += cfg.dim_u
 
         # Network layers
@@ -28,7 +28,7 @@ class AlphaNetwork(nn.Module):
     def forward(self, a_k, h_obs_features, state=None, u_k=None):
         """
         a_k:            [B, dim_a]          — Current observation
-        h_obs_features: [B, gru_hidden_dim] — Encoded obstacle
+        h_obs_features: [B, dim_obstacle] — Encoded obstacle
         state:          [B, gru_hidden_dim] — Previous GRU hidden state
         u_k:            [B, dim_u]          — Control input (optional)
 

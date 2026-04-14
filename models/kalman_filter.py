@@ -53,7 +53,7 @@ class KalmanFilter(nn.Module):
 
         a_seq:       [B, T, dim_a]        — observation sequence (encoder outputs)
         alpha_net:   nn.Module            — mixture weight network
-        h_obs:       [B, dim_h]           — static obstacle context
+        h_obs:       [B, dim_obstacle]    — static obstacle context
         A_matrices:  [K, dim_z, dim_z]    — state transition matrices (one per mixture component)
         C_matrices:  [K, dim_a, dim_z]    — observation matrices
         B_matrices:  [K, dim_z, dim_u]    — control matrices (optional)

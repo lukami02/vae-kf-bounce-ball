@@ -58,7 +58,7 @@ class BallEncoder(nn.Module):
 
         # Compute Mean and Standard Deviation
         a_mu = self.fc_mu(enc)
-        a_std = self.cfg.Q_std * torch.sigmoid(self.fc_var(enc)) + 1e-6
+        a_std = self.cfg.R_std * torch.sigmoid(self.fc_var(enc)) + 1e-6
 
         a_mu = a_mu.view(B, T, self.cfg.dim_a)
         a_std = a_std.view(B, T, self.cfg.dim_a)
@@ -79,7 +79,7 @@ class ObstacleEncoder(nn.Module):
         self._flat_size = self._get_flat_size(sim_cfg.size)
 
         # Project visual features to GRU hidden dimension
-        self.feature_proj = nn.Linear( self._flat_size, vae_cfg.gru_hidden_dim)
+        self.feature_proj = nn.Linear( self._flat_size, vae_cfg.dim_obstacle)
 
     def _get_flat_size(self, image_size):
         dummy = torch.zeros(1, 1, image_size[0], image_size[1])
@@ -91,7 +91,7 @@ class ObstacleEncoder(nn.Module):
         """
         obs_img:  [B, 1, H, W] — Static image of obstacles
 
-        features: [B, gru_hidden_dim] — Latent context vector
+        features: [B, dim_obstacle] — Latent context vector
         """
         B = obs_img.shape[0]
         
