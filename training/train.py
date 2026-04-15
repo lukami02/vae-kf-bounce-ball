@@ -53,20 +53,22 @@ def setup_logger(log_dir: str = "logs", log_file: str = "train.log") -> logging.
 
     return logger
     
-def get_optimizer(model, tcfg: TrainConfig):
+def get_optimizer(model, tcfg: TrainConfig, phase=0):
     if isinstance(model, KVAE):
+        lr_decay = 1 if phase != 3 else tcfg.enc_dec_lr_factor
+            
         param_groups = [
-            {"params": model.ball_encoder.parameters(),     "lr": tcfg.learning_rate},
+            {"params": model.ball_encoder.parameters(),     "lr": lr_decay * tcfg.learning_rate},
             {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
-            {"params": model.decoder.parameters(),          "lr": tcfg.learning_rate},
-            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate * 0.3},
-            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate * 0.3},
-            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate * 0.1},
-            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate * 0.1},
+            {"params": model.decoder.parameters(),          "lr": lr_decay * tcfg.learning_rate},
+            {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
+            {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate},
+            {"params": [model.A_matrices],                  "lr": tcfg.learning_rate},
+            {"params": [model.C_matrices],                  "lr": tcfg.learning_rate},
         ]
         if model.B_matrices is not None:
             param_groups.append(
-                {"params": [model.B_matrices], "lr": tcfg.learning_rate * 0.1}
+                {"params": [model.B_matrices], "lr": tcfg.learning_rate}
             )
     else:
         param_groups = [{"params": model.parameters(), "lr": tcfg.learning_rate}]
@@ -78,10 +80,9 @@ def get_optimizer(model, tcfg: TrainConfig):
     else:
         raise ValueError(f"Unknown optimizer: {tcfg.optimizer}")
 
-
 def get_scheduler(optimizer, tcfg: TrainConfig):
     if tcfg.lr_scheduler == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.epochs, eta_min=1e-5)
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.get_total_epochs(), eta_min=tcfg.lr_eta_min)
     elif tcfg.lr_scheduler == "step":
         return torch.optim.lr_scheduler.StepLR(optimizer, step_size=tcfg.lr_step_size, gamma=tcfg.lr_gamma)
     elif tcfg.lr_scheduler == "none":
@@ -89,180 +90,55 @@ def get_scheduler(optimizer, tcfg: TrainConfig):
     else:
         raise ValueError(f"Unknown scheduler: {tcfg.lr_scheduler}")
 
-def freeze_kalman(model):
-    for param in model.alpha_net.parameters():
-        param.requires_grad = False
-    for param in model.kalman.parameters():
-        param.requires_grad = False
-    model.A_matrices.requires_grad = False
-    model.C_matrices.requires_grad = False
-    if model.B_matrices is not None:
-        model.B_matrices.requires_grad = False
-
-def unfreeze_all(model):
-    for param in model.parameters():
-        param.requires_grad = True
-
-def train_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device):
-    model.train()
-    if isinstance(model, KVAE):
-        total_terms = {"loss": 0, "recon": 0, "innov": 0, "prior": 0, "entropy": 0, "posterior": 0}
-    else:
-        total_terms = {"loss": 0, "recon": 0, "reg": 0, "pred": 0, "entropy": 0}
-
-    for batch in loader:
-        if len(batch) == 2:
-            ball_seq, obstacle_img = batch
-            u_seq = None
-        else:
-            ball_seq, obstacle_img, u_seq = batch
-
-        ball_seq     = ball_seq.to(device)
-        obstacle_img = obstacle_img.to(device)
-        u_seq        = u_seq.to(device) if u_seq is not None else None
-        if mask is not None:
-            current_mask = mask[:ball_seq.shape[0], :]
-        else: current_mask = None
+def run_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device,
+              model_type="kvae", is_train=True):
+    model.train() if is_train else model.eval()
     
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
-
-        loss, terms = compute_loss(
-            ball_seq   = ball_seq,
-            x_dist_filt = x_dist_filt,
-            x_dist_pred = x_dist_pred,
-            a_dist     = a_dist,
-            a_seq      = a_seq,
-            a_pred     = a_pred,
-            a_filt     = a_filt,
-            z_pred     = z_pred,
-            z_filt     = z_filt,
-            S_pred     = S_pred,
-            P_filt     = P_filt,
-            R          = R,
-            Q          = Q,
-            alpha_seq  = alpha_seq,
-            alpha_imm  = alpha_imm,
-            cfg        = cfg,
-            tcfg       = tcfg,
-            epoch      = epoch
-        )
-        
-        optimizer.zero_grad()
-        loss.backward()
-        if tcfg.grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
-        optimizer.step()
-
-        for k, v in terms.items():
-            if k in total_terms:
-                total_terms[k] += v
-
-    n = len(loader)
-    return {k: v / n for k, v in total_terms.items()}
-
-def pretrain_epoch(model, loader, optimizer, cfg, tcfg, epoch, device):
-    model.train()
-    total_terms = {"loss": 0}
-
-    for batch in loader:
-        if len(batch) == 2:
-            ball_seq, obstacle_img = batch
-            u_seq = None
-        else:
-            ball_seq, obstacle_img, u_seq = batch
-
-        ball_seq     = ball_seq.to(device)
-        obstacle_img = obstacle_img.to(device)
-        u_seq        = u_seq.to(device) if u_seq is not None else None
-    
-        (x_dist_filt, _, a_dist, a_seq, _, _, _, _, _, _, _, _, _, _, _) = model(ball_seq, obstacle_img, u_seq=u_seq, phase=0)
-
-        loss, terms = compute_loss(
-            ball_seq   = ball_seq,
-            x_dist_filt = x_dist_filt,
-            x_dist_pred = None,
-            a_dist     = a_dist,
-            a_seq      = a_seq,
-            a_pred     = None,
-            a_filt     = None,
-            z_pred     = None,
-            z_filt     = None,
-            S_pred     = None,
-            P_filt     = None,
-            R          = None,
-            Q          = None,
-            alpha_seq  = None,
-            alpha_imm  = None,
-            cfg        = cfg,
-            tcfg       = tcfg,
-            epoch      = epoch,
-            phase      = 0
-        )
-        
-        optimizer.zero_grad()
-        loss.backward()
-        if tcfg.grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
-        optimizer.step()
-
-        for k, v in terms.items():
-            if k in total_terms:
-                total_terms[k] += v
-
-    n = len(loader)
-    return {k: v / n for k, v in total_terms.items()}
-
-@torch.no_grad()
-def eval_epoch(model, loader, cfg, tcfg, epoch, mask, device):
-    model.eval()
-    if isinstance(model, KVAE):
-        total_terms = {"loss": 0, "recon": 0, "innov": 0, "prior": 0, "entropy": 0, "posterior": 0}
+    is_kvae = (model_type == "kvae")
+    if is_kvae:
+        keys = ["loss", "recon", "innov", "prior", "entropy", "posterior", "bounce"]
     else:
-        total_terms = {"loss": 0, "recon": 0, "reg": 0, "pred": 0, "entropy": 0}
+        keys = ["loss", "L_recon", "L_pred", "L_kl"]
+        if model_type == "gru":
+            keys.append("L_kl_trans")
 
-    for batch in loader:
-        if len(batch) == 2:
-            ball_seq, obstacle_img = batch
-            u_seq = None
-        else:
-            ball_seq, obstacle_img, u_seq = batch
+    total_terms = {k: 0.0 for k in keys}
 
-        ball_seq     = ball_seq.to(device)
-        obstacle_img = obstacle_img.to(device)
-        u_seq        = u_seq.to(device) if u_seq is not None else None
-        if mask is not None:
-            current_mask = mask[:ball_seq.shape[0], :]
-        else: current_mask = None
+    with torch.set_grad_enabled(is_train):
+        for batch in loader:
+            ball_seq, obstacle_img, *rest = batch
+            u_seq = rest[0].to(device) if rest and rest[0] is not None else None
+            
+            ball_seq = ball_seq.to(device)
+            obstacle_img = obstacle_img.to(device)
+            current_mask = (mask[:ball_seq.shape[0], :] if mask is not None else None)
 
-        (x_dist_filt, x_dist_pred, a_dist, a_seq, a_filt, a_pred, z_filt, P_filt, z_pred, P_pred, S_pred, alpha_seq, alpha_imm, R, Q) = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask)
-        _, terms = compute_loss(
-            ball_seq   = ball_seq,
-            x_dist_filt = x_dist_filt,
-            x_dist_pred = x_dist_pred,
-            a_dist     = a_dist,
-            a_seq      = a_seq,
-            a_pred     = a_pred,
-            a_filt     = a_filt,
-            z_pred     = z_pred,
-            z_filt     = z_filt,
-            S_pred     = S_pred,
-            P_filt     = P_filt,
-            R          = R,
-            Q          = Q,
-            alpha_seq  = alpha_seq,
-            alpha_imm  = alpha_imm,
-            cfg        = cfg,
-            tcfg       = tcfg,
-            epoch      = epoch
-        )
+            outputs = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
+            
+            (x_dist_smooth, a_dist, a_seq, a_smooth, a_pred_smooth,
+             z_dist, z_smooth, z_pred, R, Q, alpha_seq) = outputs
 
-        for k, v in terms.items():
-            if k in total_terms:
-                total_terms[k] += v
+            loss, terms = compute_loss(
+                ball_seq=ball_seq, x_dist_smooth=x_dist_smooth,
+                a_dist=a_dist, a_seq=a_seq, a_smooth=a_smooth, a_pred=a_pred_smooth,
+                z_dist=z_dist, z_smooth=z_smooth, z_pred=z_pred,
+                R=R, Q=Q, alpha_seq=alpha_seq, mask=current_mask, cfg=cfg,
+                tcfg=tcfg, epoch=epoch, model_type=model_type, u_seq=u_seq
+            )
+
+            if is_train:
+                optimizer.zero_grad()
+                loss.backward()
+                if tcfg.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
+                optimizer.step()
+
+            for k, v in terms.items():
+                if k in total_terms:
+                    total_terms[k] += v.item() if hasattr(v, 'item') else v
 
     n = len(loader)
     return {k: v / n for k, v in total_terms.items()}
-
 
 def save_checkpoint(model, optimizer, epoch, terms, tcfg, logger, path=None):
     os.makedirs(tcfg.checkpoint_dir, exist_ok=True)
@@ -276,122 +152,247 @@ def save_checkpoint(model, optimizer, epoch, terms, tcfg, logger, path=None):
     logger.info(f"Checkpoint saved: {path}")
 
 def make_mask(B, T, device, free_running_steps, p_mask, randomize_start=False):
-        mask = torch.ones(B, T, device=device)
-        
-        for b in range(B):
-            if randomize_start:
-                max_start = max(T - free_running_steps, T // 2 + 1)
-                min_start = T // 2
-                start = torch.randint(min_start, max_start, (1,)).item()
-            else:
-                start = T - free_running_steps
-            mask[b, start:start + free_running_steps] = 0.0
-        
-        rand_mask = torch.rand(B, T, device=device) < p_mask
-        rand_mask[:, :int(0.1 * T)] = False
-        mask[rand_mask] = 0.0
-        
-        return mask
+    # initialize mask (1 = keep, 0 = mask)
+    mask = torch.ones(B, T, device=device)
 
-def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
+    for b in range(B):
+        if randomize_start:
+            min_start = T // 2
+            max_start = max(T - free_running_steps, T // 2 + 1)
+            start = torch.randint(min_start, max_start, (1,)).item()
+        else:
+            start = T - free_running_steps
+
+        # mask contiguous segment
+        mask[b, start:start + free_running_steps] = 0.0
+
+    # random masking
+    rand_mask = torch.rand(B, T, device=device) < p_mask
+    rand_mask[:, :int(0.1 * T)] = False 
+    mask[rand_mask] = 0.0
+
+    return mask
+
+def log_epoch(model_type, model, epoch, total_epochs, optimizer, train_terms, val_terms, tcfg, logger):
+    if epoch % tcfg.log_every != 0 and epoch != 1:
+        return
+    
+    lr = optimizer.param_groups[0]["lr"]
+
+    if model_type == "kvae":
+        logger.info(
+            f"Epoch {epoch:4d}/{total_epochs} | lr={lr:.2e} | "
+            f"loss={train_terms['loss']:.4f}  "
+            f"recon={train_terms['recon']:.4f}  "
+            f"innov={train_terms['innov']:.4f}  "
+            f"prior={train_terms['prior']:.4f}  "
+            f"entropy={train_terms['entropy']:.4f}  "
+            f"posterior={train_terms['posterior']:.4f} | "
+            f"val={val_terms['loss']:.4f}"
+        )
+    elif model_type == "gru":
+        logger.info(
+            f"Epoch {epoch:4d}/{total_epochs} | lr={lr:.2e} | "
+            f"loss={train_terms['loss']:.4f}  "
+            f"recon={train_terms['L_recon']:.4f}  "
+            f"pred={train_terms['L_pred']:.4f}  "
+            f"kl={train_terms['L_kl']:.4f}  "
+            f"kl_trans={train_terms.get('L_kl_trans', 0):.4f} | "
+            f"val={val_terms['loss']:.4f}"
+        )
+    else:  # cv
+        logger.info(
+            f"Epoch {epoch:4d}/{total_epochs} | lr={lr:.2e} | "
+            f"loss={train_terms['loss']:.4f}  "
+            f"recon={train_terms['L_recon']:.4f}  "
+            f"pred={train_terms['L_pred']:.4f}  "
+            f"kl={train_terms['L_kl']:.4f} | "
+            f"val={val_terms['loss']:.4f}"
+        )
+
+    if epoch % tcfg.save_every == 0:
+        save_checkpoint(model, optimizer, epoch, train_terms, tcfg, logger)
+
+def load_kvae_weights(model, kvae_path, logger, device):
+    """
+    Loads compatible weights from a pretrained KVAE checkpoint into model.
+    """
+    if not kvae_path or not os.path.exists(kvae_path):
+        logger.warning(f"  KVAE checkpoint not found at {kvae_path}, skipping weight transfer")
+        return
+
+    checkpoint = torch.load(kvae_path, map_location=device)
+    old_sd     = checkpoint.get('model', checkpoint)
+    new_sd     = model.state_dict()
+
+    compatible_sd = {
+        k: v for k, v in old_sd.items()
+        if k in new_sd and new_sd[k].shape == v.shape
+    }
+
+    new_sd.update(compatible_sd)
+    model.load_state_dict(new_sd)
+
+    logger.info(f"  Loaded {len(compatible_sd)}/{len(new_sd)} params from KVAE checkpoint")
+    logger.info(f"  Transferred: {list(compatible_sd.keys())}")
+
+def train_KVAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     model = model.to(device)
     optimizer = get_optimizer(model, tcfg)
     scheduler = get_scheduler(optimizer, tcfg)
-
-    logger.info("=" * 60)
-    logger.info("Starting training")
-    logger.info(f"Device:     {device}")
-    logger.info(f"Epochs:     {tcfg.epochs}")
-    logger.info(f"Batch size: {tcfg.batch_size}")
-    logger.info(f"Optimizer:  {tcfg.optimizer}  lr={tcfg.learning_rate}")
-    logger.info(f"Scheduler:  {tcfg.lr_scheduler}")
-    logger.info("=" * 60)
-
     best_val_loss = float("inf")
-    
-    if isinstance(model, KVAE):
-        freeze_kalman(model)
-    logger.info("=" * 60)
-    logger.info("Starting training")
-    logger.info(f"Phase 1: VAE pretraining for {tcfg.vae_pretrain_epochs} epochs")
-    logger.info("=" * 60)
-    for epoch in range(1, tcfg.vae_pretrain_epochs + 1):
-        pretrain_terms = pretrain_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, device)
-        if scheduler is not None:
-            scheduler.step()
-        if epoch % tcfg.log_every == 0 or epoch == 1:
-            lr = optimizer.param_groups[0]["lr"]
-            logger.info(
-                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
-                    f"loss={pretrain_terms['loss']:.4f}  ")
+    cur_epoch = 0
 
-    unfreeze_all(model)
-    scheduler = get_scheduler(optimizer, tcfg)
-    
-    logger.info("=" * 60)
-    logger.info("Phase 2: Full training")
-    logger.info("=" * 60)
-
-    for epoch in range(1, tcfg.epochs + 1):
-        B = tcfg.batch_size
-        T = sim_cfg.T
-        if epoch >= tcfg.free_running_warmup:
-            mask = make_mask(B, T, device, tcfg.free_running_steps, tcfg.p_mask, randomize_start=True)
-        else:
-            mask = make_mask(B, T, device, int(tcfg.free_running_steps * epoch / tcfg.free_running_warmup), tcfg.p_mask, randomize_start=True)
-
-        mask_val = make_mask(B, T, device, tcfg.free_running_steps, p_mask=0.0, randomize_start=False)
-
-        train_terms = train_epoch(model, train_loader, optimizer, cfg, tcfg, epoch, mask, device)
-        val_terms = eval_epoch(model, val_loader, cfg, tcfg, epoch, mask_val, device)
-
-        if scheduler is not None:
-            scheduler.step()
-
-        # INFO log 
-        if epoch % tcfg.log_every == 0 or epoch == 1:
-            lr = optimizer.param_groups[0]["lr"]
-            if isinstance(model, KVAE):
-                logger.info(
-                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
-                    f"loss={train_terms['loss']:.4f}  "
-                    f"recon={train_terms['recon']:.4f}  "
-                    f"innov={train_terms['innov']:.4f}  "
-                    f"prior={train_terms['prior']:.4f}  "
-                    f"entropy={train_terms['entropy']:.4f}  "
-                    f"posterior={train_terms['posterior']:.4f} | "
-                    f"val_loss={val_terms['loss']:.4f}"
-                )
-            else:
-                logger.info(
-                    f"Epoch {epoch:4d}/{tcfg.epochs} | lr={lr:.2e} | "
-                    f"loss={train_terms['loss']:.4f}  "
-                    f"recon={train_terms['recon']:.4f}  "
-                    f"reg={train_terms['reg']:.4f}  "
-                    f"pred={train_terms['pred']:.4f}  "
-                    f"entropy={train_terms['entropy']:.4f} | "
-                    f"val_loss={val_terms['loss']:.4f}"
-                )
-
-        # Checkpoint
-        if epoch % tcfg.save_every == 0:
-            save_checkpoint(model, optimizer, epoch, train_terms, tcfg, logger)
-
-        # Best model
-        if val_terms["loss"] < best_val_loss:
-            best_val_loss = val_terms["loss"]
-            save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
-                            path=f"{tcfg.checkpoint_dir}/best.pt")
-            logger.info(f"  New best val loss: {best_val_loss:.4f}")
-
-    save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
-                    path=f"{tcfg.checkpoint_dir}/best.pt")
+    phases = [
+        {"name": "Phase 1: Warmup", "epochs": tcfg.alpha_warmup_epochs, "mask_type": "none"},
+        {"name": "Phase 2: Full Training", "epochs": tcfg.full_training_epochs, "mask_type": "none"},
+        {"name": "Phase 3: Finetuning", "epochs": tcfg.finetune_epochs, "mask_type": "none", "reset_opt": True},
+        {"name": "Phase 4: Random Masking", "epochs": tcfg.masking_epochs, "mask_type": "random"},
+        {"name": "Phase 5: Progressive Masking", "epochs": tcfg.mask_ramp_epochs, "mask_type": "ramp"},
+        {"name": "Phase 6: Decoder Only", "epochs": tcfg.decoder_only_epochs, "mask_type": "none", "freeze_encoder": True}
+    ]
 
     logger.info("=" * 60)
-    logger.info(f"Training done. Best val loss: {best_val_loss:.4f}")
+    logger.info(f"Starting KVAE Training | Device: {device}")
     logger.info("=" * 60)
+
+    for phase in phases:
+        if phase["epochs"] <= 0: continue
+        
+        logger.info(f"\n>>> {phase['name']} for {phase['epochs']} epochs")
+        
+        if phase.get("reset_opt"):
+            optimizer = get_optimizer(model, tcfg, phase=3)
+            scheduler = get_scheduler(optimizer, tcfg)
+            
+        if phase.get("freeze_encoder"):
+            for param in model.parameters(): param.requires_grad = False
+            for param in model.decoder.parameters(): param.requires_grad = True
+
+        phase_start_epoch = cur_epoch
+        for epoch in range(cur_epoch, cur_epoch + phase["epochs"]):
+            B, T = tcfg.batch_size, sim_cfg.T
+            
+            if phase["mask_type"] == "none":
+                mask = make_mask(B, T, device, 0, 0, randomize_start=True)
+            elif phase["mask_type"] == "random":
+                mask = make_mask(B, T, device, 0, tcfg.p_mask, randomize_start=True)
+            elif phase["mask_type"] == "ramp":
+                steps = int(T * tcfg.max_mask_ratio * (epoch - phase_start_epoch) / phase["epochs"])
+                mask = make_mask(B, T, device, steps, tcfg.p_mask, randomize_start=True)
+
+            mask_val = make_mask(B, T, device, int(T * tcfg.max_mask_ratio), p_mask=0, randomize_start=False)
+
+            train_terms = run_epoch(model, train_loader, optimizer, cfg, tcfg,
+                                    epoch, mask, device, model_type="kvae", is_train=True)
+            val_terms   = run_epoch(model, val_loader, None, cfg, tcfg,
+                                    epoch, mask_val, device, model_type="kvae", is_train=False)
+
+            if scheduler: scheduler.step()
+
+            log_epoch("kvae", model, epoch, tcfg.get_total_epochs(), optimizer,
+                      train_terms, val_terms, tcfg, logger)
+            
+            if val_terms["loss"] < best_val_loss:
+                best_val_loss = val_terms["loss"]
+                save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger, path=f"{tcfg.checkpoint_dir}/best_kvae.pt")
+                logger.info(f"  New best val loss: {best_val_loss:.4f}")
+
+        cur_epoch += phase["epochs"]
+        
+        if phase.get("freeze_encoder"):
+            for param in model.parameters(): param.requires_grad = True
+
+    logger.info(f"\nTraining done. Best val loss: {best_val_loss:.4f}")
+
+def train_VAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger, model_type='cv'):
+    """
+    Unified training loop for CVVAE ('cv') and GRUVAE ('gru').
+    """
+    assert model_type in ('cv', 'gru'), f"Unknown model_type: {model_type}"
+
+    use_kvae_weights = getattr(tcfg, f'use_kvae_weights_{model_type}', False)
+    do_train         = getattr(tcfg, f'train_{model_type}', True)
+    ckpt_name        = f"best_{model_type}_vae.pt"
+
+    model = model.to(device)
+
+    if use_kvae_weights:
+        logger.info(f"  Transferring KVAE weights into {model_type.upper()}VAE...")
+        load_kvae_weights(model, tcfg.kvae_checkpoint_path, logger, device)
+
+    if not do_train:
+        logger.info(f"  train_{model_type}=False — skipping training, model used as frozen encoder/decoder")
+        return model
+
+    phases = [
+        {"name": f"Phase 1: Warmup",             "epochs": tcfg.warmup_epochs,        "mask_type": "none"},
+        {"name": f"Phase 2: Full Training",      "epochs": tcfg.full_training_epochs, "mask_type": "none"},
+        {"name": f"Phase 3: Random Masking",     "epochs": tcfg.masking_epochs,       "mask_type": "random"},
+        {"name": f"Phase 4: Progressive Masking","epochs": tcfg.mask_ramp_epochs,     "mask_type": "ramp"},
+    ]
+
+    optimizer    = get_optimizer(model, tcfg)
+    scheduler    = get_scheduler(optimizer, tcfg)
+    best_val_loss = float("inf")
+    cur_epoch     = 0
+
+    logger.info("=" * 60)
+    logger.info(f"Starting {model_type.upper()}VAE Training | Device: {device}")
+    logger.info("=" * 60)
+
+    for phase in phases:
+        if phase["epochs"] <= 0: continue
+
+        logger.info(f"\n>>> {phase['name']} for {phase['epochs']} epochs")
+        phase_start_epoch = cur_epoch
+
+        for epoch in range(cur_epoch, cur_epoch + phase["epochs"]):
+            B, T = tcfg.batch_size, sim_cfg.T
+
+            if phase["mask_type"] == "none":
+                mask = make_mask(B, T, device, 0, 0, randomize_start=True)
+            elif phase["mask_type"] == "random":
+                mask = make_mask(B, T, device, 0, tcfg.p_mask, randomize_start=True)
+            elif phase["mask_type"] == "ramp":
+                steps = int(T * tcfg.max_mask_ratio
+                            * (epoch - phase_start_epoch) / phase["epochs"])
+                mask = make_mask(B, T, device, steps, tcfg.p_mask, randomize_start=True)
+
+            mask_val = make_mask(B, T, device, int(T * tcfg.max_mask_ratio),
+                                p_mask=0, randomize_start=False)
+
+            train_terms = run_epoch(model, train_loader, optimizer, cfg, tcfg,
+                                    epoch, mask, device, model_type, is_train=True)
+            val_terms   = run_epoch(model, val_loader, None, cfg, tcfg,
+                                    epoch, mask_val, device, model_type, is_train=False)
+
+            if scheduler:
+                scheduler.step()
+
+            log_epoch(model_type, model, epoch, tcfg.get_total_epochs(), optimizer,
+                      train_terms, val_terms, tcfg, logger)
+            
+            if val_terms["loss"] < best_val_loss:
+                best_val_loss = val_terms["loss"]
+                save_checkpoint(model, optimizer, epoch, val_terms, tcfg, logger,
+                                path=f"{tcfg.checkpoint_dir}/{ckpt_name}")
+                logger.info(f"  New best val loss: {best_val_loss:.4f}")
+
+        cur_epoch += phase["epochs"]
+
+    logger.info(f"\nTraining done. Best val loss: {best_val_loss:.4f}")
+
     return model
 
+def train(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
+    if isinstance(model, KVAE):
+        train_KVAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger)
+    elif isinstance(model, CVVAE):
+        train_VAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger, model_type='cv')
+    elif isinstance(model, GRUVAE):
+        train_VAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger, model_type='gru')
+    return model
 
 if __name__ == "__main__":
     args    = parse_args()
