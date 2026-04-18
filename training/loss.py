@@ -104,7 +104,7 @@ def kvae_compute_loss(ball_seq, x_dist_smooth,
 
     if mask is None:
         mask = torch.ones(ball_seq.shape[:2], device=ball_seq.device)
-    if u_seq in None:
+    if u_seq is None:
         u_seq = torch.zeros(ball_seq.shape[:2], device=ball_seq.device)
 
     # log p(x | a) — reconstruction
