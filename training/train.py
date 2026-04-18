@@ -20,13 +20,13 @@ def parse_args():
     parser.add_argument("--checkpoint", type=str, default=None, help="Continue training from checkpoint")
     return parser.parse_args()
 
-def build_model(model_name, cfg, sim_cfg):
+def build_model(model_name, cfg, sim_cfg, tcfg):
     if model_name == "kvae":
-        return KVAE(cfg, sim_cfg)
+        return KVAE(cfg, sim_cfg, tcfg)
     elif model_name == "gru_vae":
-        return GRUVAE(cfg, sim_cfg)
+        return GRUVAE(cfg, sim_cfg, tcfg)
     elif model_name == "cv_vae":
-        return CVVAE(cfg, sim_cfg)
+        return CVVAE(cfg, sim_cfg, tcfg)
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
@@ -80,9 +80,9 @@ def get_optimizer(model, tcfg: TrainConfig, phase=0):
     else:
         raise ValueError(f"Unknown optimizer: {tcfg.optimizer}")
 
-def get_scheduler(optimizer, tcfg: TrainConfig):
+def get_scheduler(optimizer, tcfg: TrainConfig, model_type="kvae"):
     if tcfg.lr_scheduler == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.get_total_epochs(), eta_min=tcfg.lr_eta_min)
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=tcfg.get_total_epochs(model_type), eta_min=tcfg.lr_eta_min)
     elif tcfg.lr_scheduler == "step":
         return torch.optim.lr_scheduler.StepLR(optimizer, step_size=tcfg.lr_step_size, gamma=tcfg.lr_gamma)
     elif tcfg.lr_scheduler == "none":
@@ -98,9 +98,9 @@ def run_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device,
     if is_kvae:
         keys = ["loss", "recon", "innov", "prior", "entropy", "posterior", "bounce"]
     else:
-        keys = ["loss", "L_recon", "L_pred", "L_kl"]
+        keys = ["loss", "recon", "pred", "kl"]
         if model_type == "gru":
-            keys.append("L_kl_trans")
+            keys.append("trans")
 
     total_terms = {k: 0.0 for k in keys}
 
@@ -194,19 +194,19 @@ def log_epoch(model_type, model, epoch, total_epochs, optimizer, train_terms, va
         logger.info(
             f"Epoch {epoch:4d}/{total_epochs} | lr={lr:.2e} | "
             f"loss={train_terms['loss']:.4f}  "
-            f"recon={train_terms['L_recon']:.4f}  "
-            f"pred={train_terms['L_pred']:.4f}  "
-            f"kl={train_terms['L_kl']:.4f}  "
-            f"kl_trans={train_terms.get('L_kl_trans', 0):.4f} | "
+            f"recon={train_terms['recon']:.4f}  "
+            f"pred={train_terms['pred']:.4f}  "
+            f"kl={train_terms['kl']:.4f}  "
+            f"kl_trans={train_terms.get('trans', 0):.4f} | "
             f"val={val_terms['loss']:.4f}"
         )
     else:  # cv
         logger.info(
             f"Epoch {epoch:4d}/{total_epochs} | lr={lr:.2e} | "
             f"loss={train_terms['loss']:.4f}  "
-            f"recon={train_terms['L_recon']:.4f}  "
-            f"pred={train_terms['L_pred']:.4f}  "
-            f"kl={train_terms['L_kl']:.4f} | "
+            f"recon={train_terms['recon']:.4f}  "
+            f"pred={train_terms['pred']:.4f}  "
+            f"kl={train_terms['kl']:.4f} | "
             f"val={val_terms['loss']:.4f}"
         )
 
@@ -239,7 +239,7 @@ def load_kvae_weights(model, kvae_path, logger, device):
 def train_KVAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logger):
     model = model.to(device)
     optimizer = get_optimizer(model, tcfg)
-    scheduler = get_scheduler(optimizer, tcfg)
+    scheduler = get_scheduler(optimizer, tcfg, "kave")
     best_val_loss = float("inf")
     cur_epoch = 0
 
@@ -263,7 +263,7 @@ def train_KVAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logg
         
         if phase.get("reset_opt"):
             optimizer = get_optimizer(model, tcfg, phase=3)
-            scheduler = get_scheduler(optimizer, tcfg)
+            scheduler = get_scheduler(optimizer, tcfg, "kvae")
             
         if phase.get("freeze_encoder"):
             for param in model.parameters(): param.requires_grad = False
@@ -290,7 +290,7 @@ def train_KVAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logg
 
             if scheduler: scheduler.step()
 
-            log_epoch("kvae", model, epoch, tcfg.get_total_epochs(), optimizer,
+            log_epoch("kvae", model, epoch, tcfg.get_total_epochs("kvae"), optimizer,
                       train_terms, val_terms, tcfg, logger)
             
             if val_terms["loss"] < best_val_loss:
@@ -323,17 +323,20 @@ def train_VAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logge
 
     if not do_train:
         logger.info(f"  train_{model_type}=False — skipping training, model used as frozen encoder/decoder")
+        os.makedirs(tcfg.checkpoint_dir, exist_ok=True)
+        torch.save({"model": model.state_dict()}, f"{tcfg.checkpoint_dir}/{ckpt_name}")
+        logger.info(f"Checkpoint saved: {tcfg.checkpoint_dir}/{ckpt_name}")
         return model
 
     phases = [
-        {"name": f"Phase 1: Warmup",             "epochs": tcfg.warmup_epochs,        "mask_type": "none"},
-        {"name": f"Phase 2: Full Training",      "epochs": tcfg.full_training_epochs, "mask_type": "none"},
-        {"name": f"Phase 3: Random Masking",     "epochs": tcfg.masking_epochs,       "mask_type": "random"},
-        {"name": f"Phase 4: Progressive Masking","epochs": tcfg.mask_ramp_epochs,     "mask_type": "ramp"},
+        {"name": f"Phase 1: Warmup",             "epochs": tcfg.pred_warmup_epochs_vae,   "mask_type": "none"},
+        {"name": f"Phase 2: Full Training",      "epochs": tcfg.full_training_epochs_vae, "mask_type": "none"},
+        {"name": f"Phase 3: Random Masking",     "epochs": tcfg.masking_epochs_vae,       "mask_type": "random"},
+        {"name": f"Phase 4: Progressive Masking","epochs": tcfg.mask_ramp_epochs_vae,     "mask_type": "ramp"},
     ]
 
     optimizer    = get_optimizer(model, tcfg)
-    scheduler    = get_scheduler(optimizer, tcfg)
+    scheduler    = get_scheduler(optimizer, tcfg, model_type)
     best_val_loss = float("inf")
     cur_epoch     = 0
 
@@ -370,7 +373,7 @@ def train_VAE(model, train_loader, val_loader, cfg, sim_cfg, tcfg, device, logge
             if scheduler:
                 scheduler.step()
 
-            log_epoch(model_type, model, epoch, tcfg.get_total_epochs(), optimizer,
+            log_epoch(model_type, model, epoch, tcfg.get_total_epochs(model_type), optimizer,
                       train_terms, val_terms, tcfg, logger)
             
             if val_terms["loss"] < best_val_loss:
@@ -401,7 +404,7 @@ if __name__ == "__main__":
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
     tcfg    = TrainConfig()
-    
+
     tcfg.checkpoint_dir = f"checkpoints/{args.model}"
 
     logger = setup_logger(log_dir=f"logs/{args.model}", log_file="train.log")
@@ -409,15 +412,15 @@ if __name__ == "__main__":
     
     torch.manual_seed(sim_cfg.seed)
 
-    model = build_model(args.model, cfg, sim_cfg)
+    model = build_model(args.model, cfg, sim_cfg, tcfg)
     
     if args.checkpoint is not None:
         ckpt = torch.load(args.checkpoint, map_location=device)
         model.load_state_dict(ckpt["model"])
         logger.info(f"Checkpoint loaded: {args.checkpoint}")
 
-    train_dataset = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="train")
-    val_dataset   = BallDataset(sim_cfg=sim_cfg, tcfg=tcfg, split="val")
+    train_dataset = BallDataset(sim_cfg=sim_cfg, cfg=cfg, tcfg=tcfg, split="train")
+    val_dataset   = BallDataset(sim_cfg=sim_cfg, cfg=cfg, tcfg=tcfg, split="val")
 
     train_loader = DataLoader(train_dataset, batch_size=tcfg.batch_size, shuffle=True,  num_workers=4)
     val_loader   = DataLoader(val_dataset,   batch_size=tcfg.batch_size, shuffle=False, num_workers=4)
