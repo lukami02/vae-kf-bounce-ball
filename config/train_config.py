@@ -18,10 +18,10 @@ class TrainConfig:
     max_mask_ratio: float = 0.25       # max % of sequence masked
 
     # trainig cvvae/gruvae
-    pred_warmup_epochs:   int = 20     # train without prediction loss
-    full_training_epochs: int = 80     # full VAE training
-    masking_epochs:       int = 30     # random masking phase
-    mask_ramp_epochs:     int = 30     # progressive masking phase
+    pred_warmup_epochs_vae:   int = 20 # train without prediction loss
+    full_training_epochs_vae: int = 80 # full VAE training
+    masking_epochs_vae:       int = 30 # random masking phase
+    mask_ramp_epochs_vae:     int = 30 # progressive masking phase
     
     kl_annealing: bool = True
     kl_warmup_epochs: int = 30
@@ -32,9 +32,9 @@ class TrainConfig:
     use_kvae_weights_gru: bool = True
     kvae_checkpoint_path: str  = "checkpoints/kvae/best_kvae.pt"
 
-    ## skip training
-    train_cv:  bool = True
-    train_gru: bool = False
+    ## no skip training
+    train_cv:  bool = False
+    train_gru: bool = True
 
     # optimization 
     learning_rate: float = 5e-3
@@ -66,6 +66,7 @@ class TrainConfig:
     lambda_alpha: float = 1.0      # Alpha loss
     lambda_pred: float = 1.0       # prediction loss
     lambda_kl_trans: float = 0.0   # transition loss
+    lambda_kl: float = 0.0         # KL divergence loss     
 
     # logging
     log_every: int = 5
@@ -87,12 +88,12 @@ class TrainConfig:
 
     def get_lambda_pred(self, epoch: int) -> float:
         """Prediction loss warmup."""
-        if epoch < self.pred_warmup_epochs:
-            return self.lambda_pred * (epoch / self.pred_warmup_epochs)
+        if epoch < self.pred_warmup_epochs_vae:
+            return self.lambda_pred * (epoch / self.pred_warmup_epochs_vae)
         return self.lambda_pred
     
     def get_lambda_kl_trans(self, epoch: int) -> float:
         """Transition loss warmup"""
         if epoch < self.kl_trans_warmup_epochs:
             return self.lambda_kl_trans * (epoch / self.kl_trans_warmup_epochs)
-        return self.kl_trans_warmup_epochs
+        return self.lambda_kl_trans

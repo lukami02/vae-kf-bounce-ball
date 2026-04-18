@@ -207,16 +207,17 @@ def vae_compute_loss(ball_seq, x_dist_smooth, a_dist, a_seq, a_pred, tcfg, epoch
     loss = (tcfg.lambda_recon           * L_recon +
             tcfg.get_lambda_pred(epoch) * L_pred  +
             tcfg.get_lambda_kl(epoch)   * L_kl    + 
-            tcfg.get_lambda_trans       * L_kl_trans
+            tcfg.get_lambda_kl_trans(epoch) * L_kl_trans
             )
-
-    return {
-        'loss':    loss,
-        'recon': L_recon.item(),
-        'pred':  L_pred.item(),
-        'kl':    L_kl.item(),
-        'trans': L_kl_trans.item()
+    
+    terms = {
+        "loss":      loss.item(),
+        "recon":     L_recon.item(),
+        "pred":      L_pred.item(),
+        "kl":        L_kl.item(),
+        "trans":     L_kl_trans.item(),
     }
+    return loss, terms
 
 def compute_loss(ball_seq, x_dist_smooth,
                 a_dist, a_seq, a_smooth, a_pred,
