@@ -30,7 +30,7 @@ class TrainConfig:
     ## weight transfer
     use_kvae_weights_cv:  bool = True
     use_kvae_weights_gru: bool = True
-    kvae_checkpoint_path: str  = "checkpoints/best_vae.pt"
+    kvae_checkpoint_path: str  = "checkpoints/kvae/best_kvae.pt"
 
     ## skip training
     train_cv:  bool = True
@@ -48,8 +48,8 @@ class TrainConfig:
 
     # data
     batch_size: int = 128
-    val_split: float = 0.1
-    test_split: float = 0.01
+    val_split: float = 1/16
+    test_split: float = 1/16
     seed: int = 42
 
     # loss / traing tricks 

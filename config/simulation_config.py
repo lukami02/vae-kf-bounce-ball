@@ -9,7 +9,7 @@ class SimulationConfig:
     seed: int = 42                         # RNG seed
     T: int = 40                            # number of frames per episode
     substeps: int = 4                      # number of physics substeps per frame
-    episodes: int = 8192                   # number of episodes to generate
+    episodes: int = 16000                  # number of episodes to generate
     data_dir:  str = "dataset/"            # directory to save generated .npy files
 
     # ball
