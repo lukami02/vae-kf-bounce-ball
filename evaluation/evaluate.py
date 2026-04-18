@@ -37,13 +37,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_model(checkpoint_path, model_name, cfg, sim_cfg, device):
+def load_model(checkpoint_path, model_name, cfg, sim_cfg, tcfg, device):
     if model_name == "kvae":
-        model = KVAE(cfg, sim_cfg)
+        model = KVAE(cfg, sim_cfg, tcfg)
     elif model_name == "gru_vae":
-        model = GRUVAE(cfg, sim_cfg)
+        model = GRUVAE(cfg, sim_cfg, tcfg)
     elif model_name == "cv_vae":
-        model = CVVAE(cfg, sim_cfg)
+        model = CVVAE(cfg, sim_cfg, tcfg)
     else: 
         raise ValueError(f"Unknown model: {model_name}")
     model = model.to(device)
@@ -173,7 +173,7 @@ def evaluate(checkpoint_path, model_name, results_dir, cfg, sim_cfg, tcfg, devic
     os.makedirs(results_dir, exist_ok=True)
 
     # Model
-    model = load_model(checkpoint_path, model_name, cfg, sim_cfg, device)
+    model = load_model(checkpoint_path, model_name, cfg, sim_cfg, tcfg, device)
 
     # Dataset
     test_dataset = BallDataset(sim_cfg, tcfg, split="test")

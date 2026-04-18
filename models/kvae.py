@@ -102,7 +102,8 @@ if __name__ == "__main__":
 
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
-    model   = KVAE(cfg, sim_cfg)
+    tcfg    = TrainConfig()
+    model   = KVAE(cfg, sim_cfg, tcfg)
 
     B, T, H, W = 4, 20, 32, 32
     ball_seq     = torch.zeros(B, T, H, W)

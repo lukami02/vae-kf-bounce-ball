@@ -5,6 +5,7 @@ import sys
 sys.path.append("..")
 from config.vae_config import VAEConfig
 from config.simulation_config import SimulationConfig
+from config.train_config import TrainConfig
 from models.base_vae import BaseVAE
 from models.kvae import KVAE
 
@@ -13,8 +14,8 @@ class GRUVAE(BaseVAE):
     """
     VAE + GRU prediction in latent space.
     """
-    def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig, kvae: KVAE = None):
-        super().__init__(cfg, sim_cfg)
+    def __init__(self, cfg: VAEConfig, sim_cfg: SimulationConfig, tcfg: TrainConfig, kvae: KVAE = None):
+        super().__init__(cfg, sim_cfg, tcfg)
         if kvae:
             self.ball_encoder = copy.deepcopy(kvae.ball_encoder)
             self.decoder = copy.deepcopy(kvae.decoder)
