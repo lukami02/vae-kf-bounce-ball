@@ -36,7 +36,7 @@ class KVAE(BaseVAE):
             cfg.C_std * torch.randn(cfg.num_matrices, cfg.dim_a, cfg.dim_z)   
         )
 
-    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, epoch=100):
+    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, epoch=100, smoother=False):
         """
         ball_seq:      [B, T, H, W]          — sequence of ball images
         obstacle_img:  [B, H, W]             — static obstacle image
@@ -83,7 +83,8 @@ class KVAE(BaseVAE):
             B_matrices  = self.B_matrices,
             u_seq       = u_seq,
             mask        = mask,
-            epoch       = epoch
+            epoch       = epoch,
+            smoother    = smoother
         )
 
         # Decode

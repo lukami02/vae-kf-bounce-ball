@@ -332,7 +332,7 @@ class KalmanFilter(nn.Module):
 
         return z_smooth_sample, P_smooth, z_pred_smooth, P_pred_smooth, a_smooth, a_pred_smooth, z_dist 
 
-    def forward(self, a_seq, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None, epoch=100):
+    def forward(self, a_seq, alpha_net, h_obs, A_matrices, C_matrices, B_matrices=None, u_seq=None, mask=None, epoch=100, smoother=False):
         """
         a_seq:       [B, T, dim_a]     — encoder output sequence
         alpha_net:   AlphaNetwork      — mixture weight network
@@ -343,6 +343,7 @@ class KalmanFilter(nn.Module):
         u_seq:       [B, T, dim_u]     — control input sequence (optional)
         mask:        [B, T]            — validity mask
         epoch:       int               — current training epoch
+        smoother:    boolean           — return smoothed/filtered output
 
         z_smooth:       [B, T, dim_z]        — smoothed latent states
         P_smooth:       [B, T, dim_z, dim_z] — smoothed covariances
@@ -378,5 +379,7 @@ class KalmanFilter(nn.Module):
             C_list       = C_list,
             u_seq        = u_seq
         )
-
-        return z_smooth, P_smooth, z_dist, z_pred_smooth, P_pred_smooth, a_smooth, a_pred_smooth, alpha_seq
+        if smoother:
+            return z_smooth, P_smooth, z_dist, z_pred_smooth, P_pred_smooth, a_smooth, a_pred_smooth, alpha_seq
+        else:
+            return z_filt, P_filt, z_dist_filt, z_pred, P_pred, a_filt, a_pred, alpha_seq

@@ -113,7 +113,7 @@ def run_epoch(model, loader, optimizer, cfg, tcfg, epoch, mask, device,
             obstacle_img = obstacle_img.to(device)
             current_mask = (mask[:ball_seq.shape[0], :] if mask is not None else None)
 
-            outputs = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch)
+            outputs = model(ball_seq, obstacle_img, u_seq=u_seq, mask=current_mask, epoch=epoch, smoother=True)
             
             (x_dist_smooth, a_dist, a_seq, a_smooth, a_pred_smooth,
              z_dist, z_smooth, z_pred, R, Q, alpha_seq) = outputs

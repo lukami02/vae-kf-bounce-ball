@@ -29,7 +29,7 @@ class GRUVAE(BaseVAE):
 
         self.fc_pred = nn.Linear(cfg.gru_hidden_dim, cfg.dim_a)
 
-    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, epoch=100):
+    def forward(self, ball_seq, obstacle_img, u_seq=None, mask=None, epoch=100, smoother=False):
         """
         ball_seq:      [B, T, H, W]          — sequence of ball images
         obstacle_img:  [B, H, W]             — static obstacle image

@@ -20,7 +20,7 @@ class CVVAE(BaseVAE):
             self.ball_encoder = copy.deepcopy(kvae.ball_encoder)
             self.decoder = copy.deepcopy(kvae.decoder)
 
-    def forward(self, ball_seq, obstacle_img=None, u_seq=None, mask=None, epoch=100):
+    def forward(self, ball_seq, obstacle_img=None, u_seq=None, mask=None, epoch=100, smoother=False):
         """
         ball_seq:      [B, T, H, W]          — sequence of ball images
         mask:          [B, T]                — mask for valid timesteps
