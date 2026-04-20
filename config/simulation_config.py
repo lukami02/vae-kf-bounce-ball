@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class SimulationConfig:
     # simulation 
     size: tuple[int, int] = (32, 32)       # (H, W)
-    gravity: bool = False                  # enable gravity
+    gravity: bool = True                   # enable gravity
     gravity_chance: float = 0.5            # probability of triggering gravity
     seed: int = 42                         # RNG seed
     T: int = 40                            # number of frames per episode

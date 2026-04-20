@@ -59,7 +59,7 @@ def get_optimizer(model, tcfg: TrainConfig, phase=0):
             
         param_groups = [
             {"params": model.ball_encoder.parameters(),     "lr": lr_decay * tcfg.learning_rate},
-            {"params": model.obstacle_encoder.parameters(), "lr": tcfg.learning_rate},
+            {"params": model.obstacle_encoder.feature_proj.parameters(), "lr": tcfg.learning_rate},
             {"params": model.decoder.parameters(),          "lr": lr_decay * tcfg.learning_rate},
             {"params": model.alpha_net.parameters(),        "lr": tcfg.learning_rate},
             {"params": model.kalman.parameters(),           "lr": tcfg.learning_rate},
@@ -404,6 +404,13 @@ if __name__ == "__main__":
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
     tcfg    = TrainConfig()
+
+    {"name": "Phase 1: Warmup", "epochs": tcfg.alpha_warmup_epochs, "mask_type": "none"},
+    {"name": "Phase 2: Full Training", "epochs": tcfg.full_training_epochs, "mask_type": "none"},
+    {"name": "Phase 3: Finetuning", "epochs": tcfg.finetune_epochs, "mask_type": "none", "reset_opt": True},
+    {"name": "Phase 4: Random Masking", "epochs": tcfg.masking_epochs, "mask_type": "random"},
+    {"name": "Phase 5: Progressive Masking", "epochs": tcfg.mask_ramp_epochs, "mask_type": "ramp"},
+    {"name": "Phase 6: Decoder Only", "epochs": tcfg.decoder_only_epochs, "mask_type": "none", "freeze_encoder": True}
 
     tcfg.checkpoint_dir = f"checkpoints/{args.model}"
 
