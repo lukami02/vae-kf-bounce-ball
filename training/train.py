@@ -404,14 +404,6 @@ if __name__ == "__main__":
     cfg     = VAEConfig()
     sim_cfg = SimulationConfig()
     tcfg    = TrainConfig()
-
-    {"name": "Phase 1: Warmup", "epochs": tcfg.alpha_warmup_epochs, "mask_type": "none"},
-    {"name": "Phase 2: Full Training", "epochs": tcfg.full_training_epochs, "mask_type": "none"},
-    {"name": "Phase 3: Finetuning", "epochs": tcfg.finetune_epochs, "mask_type": "none", "reset_opt": True},
-    {"name": "Phase 4: Random Masking", "epochs": tcfg.masking_epochs, "mask_type": "random"},
-    {"name": "Phase 5: Progressive Masking", "epochs": tcfg.mask_ramp_epochs, "mask_type": "ramp"},
-    {"name": "Phase 6: Decoder Only", "epochs": tcfg.decoder_only_epochs, "mask_type": "none", "freeze_encoder": True}
-
     tcfg.checkpoint_dir = f"checkpoints/{args.model}"
 
     logger = setup_logger(log_dir=f"logs/{args.model}", log_file="train.log")

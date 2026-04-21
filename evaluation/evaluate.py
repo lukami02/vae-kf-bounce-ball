@@ -111,16 +111,17 @@ def compute_mse_per_step(model, loader, max_steps, smoother, device):
                       if u_seq is not None else np.zeros(B, dtype=bool)
  
         for n in range(1, max_steps + 1):
+            start = T // 2 - n // 2
+            end   = start + n
+
             mask = torch.ones(B, T, device=device)
-            mask[:, T - n:] = 0.0
+            mask[:, start:end] = 0.0
  
             (x_dist, *_) = model(ball_seq, obstacle_img, u_seq=u_seq,
-                                 mask=mask, smoother=smoother) \
-                           if hasattr(model, "kalman") else \
-                           model(ball_seq, obstacle_img, u_seq=u_seq, mask=mask)
+                                 mask=mask, smoother=smoother)
  
-            mse = ((x_dist.mean[:, T - n:] - ball_seq[:, T - n:]) ** 2) \
-                    .mean(dim=(2, 3)).mean(dim=1).cpu().numpy()   # [B]
+            mse = ((x_dist.mean[:, start:end] - ball_seq[:, start:end]) ** 2) \
+                    .mean(dim=(2, 3)).mean(dim=1).cpu().numpy()  # [B]
  
             mse_no_grav[n-1]  += mse[~has_gravity].sum()
             cnt_no_grav[n-1]  += (~has_gravity).sum()
@@ -172,7 +173,7 @@ def evaluate(checkpoint_path, model_name, results_dir,
  
     model = load_model(checkpoint_path, model_name, cfg, sim_cfg, tcfg, device)
  
-    test_dataset = BallDataset(sim_cfg, tcfg, split="test")
+    test_dataset = BallDataset(sim_cfg, cfg, tcfg, split="test")
     test_loader  = DataLoader(test_dataset, batch_size=32,
                               shuffle=False, num_workers=4)
  

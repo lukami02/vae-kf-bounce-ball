@@ -330,36 +330,41 @@ def plot_imputation(a_mu, a_filt, a_smooth, mask=None, save_path=None):
     a_smooth: [T, dim_a] — RTS smoother trajectory
     mask:     [T]        — binary mask (0 = masked)
     """
-    fig, ax = plt.subplots(figsize=(7, 7))
- 
-    ax.plot(a_mu[:, 0], a_mu[:, 1],
-            color="black", linewidth=1.5, alpha=0.7,
-            label="Encoder $a_\\mu$ (reference)", zorder=1)
-    ax.plot(a_filt[:, 0], a_filt[:, 1],
-            color="steelblue", linewidth=2.0, linestyle="--",
-            label="Kalman filter", zorder=2)
-    ax.plot(a_smooth[:, 0], a_smooth[:, 1],
-            color="seagreen", linewidth=2.0,
-            label="RTS smoother", zorder=3)
- 
-    if mask is not None:
-        masked = np.where(mask == 0)[0]
-        if len(masked):
-            ax.scatter(a_filt[masked, 0], a_filt[masked, 1],
-                       color="steelblue", s=40, alpha=0.5, zorder=4)
-            ax.scatter(a_smooth[masked, 0], a_smooth[masked, 1],
-                       color="seagreen", s=40, alpha=0.5, zorder=4)
- 
-    ax.scatter(*a_mu[0],  color="forestgreen", s=150, zorder=5,
-               edgecolors="black", label="Start")
-    ax.scatter(*a_mu[-1], color="crimson", s=150, zorder=5,
-               marker="X", edgecolors="black", label="End")
- 
-    ax.set_xlabel("$a_1$", fontsize=12)
-    ax.set_ylabel("$a_2$", fontsize=12)
-    ax.set_title("Imputation: Filter vs RTS Smoother", fontsize=13, fontweight='bold', pad=15)
-    ax.legend(fontsize=9, loc='upper left', frameon=True, framealpha=0.9)
-    ax.grid(True, linestyle="--", alpha=0.3, zorder=0)
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    if mask is None:
+        mask = np.ones(len(a_mu))
+    idx_impute = np.where(mask == 0)[0]
+    
+    ax.plot(a_mu[:, 0], a_mu[:, 1], color='gray', linestyle=':', 
+            linewidth=1.0, label='Encoder $a_\mu$', zorder=1)
+
+    ax.plot(a_filt[:, 0], a_filt[:, 1], color="#21527A", 
+            linewidth=1.2, linestyle="--", alpha=0.6, zorder=2)
+    
+    if len(idx_impute) > 0:
+        ax.plot(a_filt[idx_impute, 0], a_filt[idx_impute, 1], color="#21527A", 
+                linewidth=2.5, linestyle="--", label="Filter Imputation", zorder=4)
+
+    ax.plot(a_smooth[:, 0], a_smooth[:, 1], color="#16a085", 
+            linewidth=1.2, alpha=0.6, zorder=3)
+    
+    if len(idx_impute) > 0:
+        ax.plot(a_smooth[idx_impute, 0], a_smooth[idx_impute, 1], color="#16a085", 
+                linewidth=6.0, alpha=0.2, zorder=4)
+        ax.plot(a_smooth[idx_impute, 0], a_smooth[idx_impute, 1], color="#16a085", 
+                linewidth=2.8, label="RTS Imputation", zorder=5)
+
+    ax.scatter(*a_mu[0], color="#2ecc71", s=180, zorder=7, 
+               edgecolors="white", linewidth=1.5, label="Start")
+    ax.scatter(*a_mu[-1], color="#e74c3c", s=180, zorder=7, 
+               marker="X", edgecolors="white", linewidth=1.5, label="End")
+
+    ax.set_xlabel("$a_1$", fontsize=12, fontweight='500')
+    ax.set_ylabel("$a_2$", fontsize=12, fontweight='500')
+    ax.set_title("Latent Space Imputation Analysis", fontsize=14, fontweight='bold', pad=20)
+    ax.legend(fontsize=9, loc='upper left', frameon=False)
+    ax.grid(True, linestyle=":", alpha=0.3, color="gray")
     ax.axis("equal")
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
