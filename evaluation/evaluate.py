@@ -19,9 +19,8 @@ from utils.visualize import (
     plot_reconstruction_grid,
     plot_alpha,
     plot_prediction_mse,
-    plot_latent_space,
     plot_uncertainty,
-    plot_imputation,
+    plot_imputation
 )
 logger = logging.getLogger("kvae.evaluate")
 
@@ -223,13 +222,6 @@ def evaluate(checkpoint_path, model_name, results_dir,
             save_path = os.path.join(sample_dir, "trajectories.png")
         )
  
-        plot_latent_space(
-            a_mu      = out["a_mu"],
-            a_smooth  = out["a_smooth"],
-            smoother  = smoother,
-            save_path = os.path.join(sample_dir, "latent_space.png")
-        )
- 
         plot_reconstruction_grid(
             ball_seq   = out["ball_seq"],
             x_hat_filt = out["x_hat"],
@@ -258,7 +250,7 @@ def evaluate(checkpoint_path, model_name, results_dir,
                 smoother  = smoother,
                 save_path = os.path.join(sample_dir, "uncertainty.png")
             )
- 
+
         # imputation — only meaningful for KVAE
         if model_name == "kvae":
             out_filt = run_model(model, ball_seq, obstacle_img, u_seq,
@@ -274,7 +266,7 @@ def evaluate(checkpoint_path, model_name, results_dir,
             )
  
         logger.info(f"  Sample {i} saved in {sample_dir}")
- 
+
     logger.info(f"Evaluation complete. Results in: {results_dir}")
     return metrics, mse_no_grav, mse_grav
 

@@ -7,48 +7,56 @@ import sys
 sys.path.append("..")
 
 
-def plot_trajectories(a_mu, a_smooth, smoother=False, save_path=None):
+def plot_trajectories(a_mu, a_smooth, smoother=False, free_run_range=None, save_path=None):
     """
     Plot trajectory in latent space.
  
-    a_mu:        [T, dim_a] — encoder output (noisy)
-    a_smooth:    [T, dim_a] — filtered or smoothed trajectory
-    smoother:    bool       — whether a_smooth is RTS-smoothed or Kalman-filtered
+    a_mu:           [T, dim_a]           — encoder output (noisy)
+    a_smooth:       [T, dim_a]           — filtered or smoothed trajectory
+    smoother:       bool                 — whether a_smooth is RTS-smoothed or Kalman-filtered
+    free_run_range: (start_idx, end_idx) — indices for the prediction/masked gap
     """
     fig, ax = plt.subplots(figsize=(7, 7))
  
     smooth_label = "RTS smoothed $\\hat{a}^s$" if smoother else "Kalman filtered $\\hat{a}$"
  
     ax.plot(a_mu[:, 0], a_mu[:, 1],
-            color="gray", linestyle="--", linewidth=1.5, alpha=0.6,
-            label="Encoder $a_\\mu$", zorder=1)
+            color='gray', linestyle=':', linewidth=1.0, alpha=0.4, 
+            label='Encoder $a_\\mu$', zorder=1)
  
     ax.plot(a_smooth[:, 0], a_smooth[:, 1],
             color="darkorange", linewidth=2.5,
             label=smooth_label, zorder=2)
+    
+    if free_run_range is not None:
+        start_idx, end_idx = free_run_range
+        free = a_smooth[start_idx:end_idx]
+        ax.plot(free[:, 0], free[:, 1],
+                color='#FF4500', linewidth=2.5, linestyle='--',
+                label='Free-running (Pred.)', zorder=3)
  
     step = max(1, len(a_smooth) // 8)
     for i in range(0, len(a_smooth) - 1, step):
         ax.annotate("", xy=(a_smooth[i+1, 0], a_smooth[i+1, 1]),
                     xytext=(a_smooth[i, 0], a_smooth[i, 1]),
-                    arrowprops=dict(arrowstyle="->", color="darkred", lw=1.5))
- 
-    ax.scatter(*a_smooth[0],  color="forestgreen", s=150, zorder=5,
-               edgecolors="black", label="Start")
-    ax.scatter(*a_smooth[-1], color="crimson", s=150, zorder=5,
-               marker="X", edgecolors="black", label="End")
+                    arrowprops=dict(arrowstyle="->", color="black", alpha=0.5, lw=1.0))
+    
+    ax.scatter(*a_smooth[0],  color="forestgreen", s=120, zorder=5, label='Start $t=1$',
+               edgecolors='black', linewidth=1.0)
+    ax.scatter(*a_smooth[-1], color="crimson", s=120, zorder=5, label='End $t=T$',
+               marker='X', edgecolors='black', linewidth=1.0)
  
  
     ax.set_xlabel("$a_1$", fontsize=12)
     ax.set_ylabel("$a_2$", fontsize=12)
-    ax.set_title("Latent Space Trajectories", fontsize=14)
-    ax.legend(fontsize=10)
-    ax.grid(True, linestyle=":", alpha=0.4)
+    ax.set_title("Latent Space Trajectories", fontsize=14, fontweight='bold', pad=15)
+    ax.legend(fontsize=8, loc='best', frameon=True, shadow=False)
+    ax.grid(True, linestyle=":", alpha=0.5)
     ax.axis("equal")
- 
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
     plt.tight_layout()
     _save_or_show(fig, save_path)
-
 
 def plot_reconstruction_grid(ball_seq, x_hat_filt, x_hat_pred=None, frame_indices=None, save_path=None):
     """
@@ -87,54 +95,81 @@ def plot_reconstruction_grid(ball_seq, x_hat_filt, x_hat_pred=None, frame_indice
     plt.tight_layout()
     _save_or_show(fig, save_path)
 
-def plot_alpha(alpha_seq, ball_seq=None, save_path=None):
+def plot_alpha(alpha_seq, ball_seq=None, obs_img=None, free_run_range=None, save_path=None):
     """
-    Stacked area plot of alpha weights over time, optionally with
-    a strip of ball frames along the top for reference.
- 
-    alpha_seq: [T, K] — mixing weights
-    ball_seq:  [T, H, W] — original frames (optional)
+    Plots the mixing weights (alpha) over time, optionally with environment frames.
+
+    Args:
+        alpha_seq:      [T, K]               — mixture weights over dynamics
+        ball_seq:       [T, H, W]            — sequence of ball images
+        obs_img:        [H, W]               — static obstacle image
+        free_run_range: (start_idx, end_idx) — indices for the prediction/masked gap
     """
     T, K = alpha_seq.shape
-    t    = np.arange(T)
- 
-    has_frames = ball_seq is not None
-    fig = plt.figure(figsize=(12, 5 if not has_frames else 6.5))
- 
+    t = np.arange(T)
+    
+    if free_run_range:
+        start_idx = free_run_range[0]
+        end_idx   = free_run_range[1]
+
+    has_frames = ball_seq is not None and obs_img is not None
+    fig = plt.figure(figsize=(12, 7), dpi=150)
+
     if has_frames:
-        gs     = gridspec.GridSpec(2, 1, height_ratios=[1, 3], hspace=0.05)
+        gs = gridspec.GridSpec(2, 1, height_ratios=[1.2, 3], hspace=0.2)
         ax_img = fig.add_subplot(gs[0])
-        ax     = fig.add_subplot(gs[1])
- 
-        n_show = min(T, 20)
-        step   = max(1, T // n_show)
-        shown  = list(range(0, T, step))[:n_show]
- 
-        img_strip = np.concatenate([ball_seq[i].squeeze() for i in shown], axis=1)
-        ax_img.imshow(img_strip, cmap="gray", vmin=0, vmax=1, aspect="auto")
+        ax = fig.add_subplot(gs[1])
+
+        n_show = min(T, 10)
+        step = max(1, T // n_show)
+        shown = list(range(0, T, step))[:n_show]
+
+        combined_frames = []
+        separator_width = 2
+        
+        for i in shown:
+            ball_f = ball_seq[i].squeeze()
+            obs_f  = obs_img.squeeze()
+            frame = np.maximum(ball_f, obs_f)
+            combined_frames.append(frame)
+            
+            if i != shown[-1]:
+                separator = np.ones((frame.shape[0], separator_width)) 
+                combined_frames.append(separator)
+
+        img_strip = np.concatenate(combined_frames, axis=1)
+        ax_img.imshow(img_strip, cmap="bone", vmin=0, vmax=1, aspect="auto")
         ax_img.axis("off")
-        ax_img.set_title("Ball frames (reference)", fontsize=10, loc="left")
+        ax_img.set_title("Time-lapsed Environment Frames", fontsize=10, fontweight='bold', loc="left")
+        
+        for s_idx in shown:
+            ax.axvline(s_idx, color='white', linestyle='--', alpha=0.3, lw=0.8, zorder=4)
     else:
         ax = fig.add_subplot(111)
- 
-    colors   = ["steelblue", "seagreen", "tomato", "mediumpurple", "orange"]
+
+    colors = ["#4682B4", "#2E8B57", "#CD5C5C"]
     alphas_np = alpha_seq if isinstance(alpha_seq, np.ndarray) else alpha_seq.numpy()
- 
+
     ax.stackplot(t, alphas_np.T,
-                 labels=[f"$\\alpha^{{({i+1})}}$" for i in range(K)],
-                 colors=colors[:K], alpha=0.85)
- 
-    ax.set_xlabel("Time step $t$", fontsize=12)
-    ax.set_ylabel("Mixing weight", fontsize=12)
-    ax.set_title("Dynamics Mixing Weights $\\alpha_t$ over Time", fontsize=13)
-    ax.legend(loc="upper right", fontsize=10)
+                 labels=[f"Dynamics $\\alpha^{{({i+1})}}$" for i in range(K)],
+                 colors=colors[:K], alpha=0.8, zorder=2)
+
+    if free_run_range:
+        ax.axvspan(start_idx, end_idx - 1, color='gray', alpha=0.6, 
+               facecolor='gray', linestyle=':', label='Masked Gap', zorder=3)
+
+    ax.set_xlabel("Time step $t$", fontsize=11, fontweight='bold')
+    ax.set_ylabel("Mixing weight", fontsize=11, fontweight='bold')
+    
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=K+1, frameon=False, fontsize=9)
+    
     ax.set_xlim(0, T - 1)
     ax.set_ylim(0, 1)
-    ax.grid(True, alpha=0.3)
- 
-    plt.tight_layout()
-    _save_or_show(fig, save_path)
+    ax.grid(True, axis='y', alpha=0.2)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
+    _save_or_show(fig, save_path)
 
 def plot_prediction_mse(mse_per_step_kvae, mse_per_step_vae=None, save_path=None):
     """
@@ -204,41 +239,6 @@ def plot_alpha_space(model, grid_positions, obstacle_img, u_seq, device, save_pa
     plt.tight_layout()
     _save_or_show(fig, save_path)
 
-def plot_latent_space(a_mu, a_smooth, smoother=False, save_path=None):
-    """
-    Side-by-side scatter of encoder output vs filtered/smoothed trajectory,
-    coloured by time step.
- 
-    a_mu:     [T, dim_a] — encoder output
-    a_smooth: [T, dim_a] — filtered or smoothed trajectory
-    smoother: bool       — label accordingly
-    """
-    T      = a_mu.shape[0]
-    t      = np.arange(T)
-    label2 = "RTS smoothed $\\hat{a}^s$" if smoother else "Kalman filtered $\\hat{a}$"
- 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
- 
-    for ax, data, title, color in zip(
-        axes,
-        [a_mu, a_smooth],
-        [f"Encoder output $a_\\mu$ (raw)", label2],
-        ["steelblue", "darkorange"]
-    ):
-        sc = ax.scatter(data[:, 0], data[:, 1],
-                        c=t, cmap="viridis", s=20, alpha=0.85)
-        ax.plot(data[:, 0], data[:, 1],
-                color=color, linewidth=0.8, alpha=0.5)
-        ax.set_xlabel("$a_1$", fontsize=12)
-        ax.set_ylabel("$a_2$", fontsize=12)
-        ax.set_title(title, fontsize=12)
-        ax.grid(True, alpha=0.3)
-        plt.colorbar(sc, ax=ax, label="Time step")
- 
-    plt.suptitle("Latent Space: Encoder vs Kalman", fontsize=14)
-    plt.tight_layout()
-    _save_or_show(fig, save_path)
-
 def plot_uncertainty(P_diag, mask=None, smoother=False, save_path=None):
     """
     Plot diagonal of covariance matrix P_t over time.
@@ -263,17 +263,19 @@ def plot_uncertainty(P_diag, mask=None, smoother=False, save_path=None):
     for d in range(dim_z):
         ax.plot(t, P_diag[:, d],
                 color=colors[d % len(colors)], linewidth=1.8,
-                label=f"$P_{{t,{d+1}{d+1}}}$")
+                label=f"$P_{{t,{d+1}{d+1}}}$", zorder=3)
  
-    ax.set_xlabel("Time step $t$", fontsize=12)
-    ax.set_ylabel("Variance", fontsize=12)
-    ax.set_title(f"Posterior Covariance over Time — {label}", fontsize=13)
-    ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
+    ax.set_xlabel("Time step $t$", fontsize=11, fontweight='bold')
+    ax.set_ylabel("Variance", fontsize=11, fontweight='bold')
+    ax.set_title(f"Posterior Covariance over Time — {label}", 
+                 fontsize=13, fontweight='bold', pad=15)
+    ax.legend(fontsize=9, loc='upper left', frameon=True, framealpha=0.9)
+    ax.grid(True, linestyle='--', alpha=0.4, zorder=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
  
     plt.tight_layout()
     _save_or_show(fig, save_path)
- 
  
 def plot_prediction_mse(mse_kvae, mse_gru=None, mse_cv=None,
                         mse_kvae_grav=None, mse_gru_grav=None, mse_cv_grav=None,
@@ -319,7 +321,6 @@ def plot_prediction_mse(mse_kvae, mse_gru=None, mse_cv=None,
     plt.tight_layout()
     _save_or_show(fig, save_path)
  
- 
 def plot_imputation(a_mu, a_filt, a_smooth, mask=None, save_path=None):
     """
     Compare filter vs smoother trajectories during masked steps.
@@ -356,14 +357,14 @@ def plot_imputation(a_mu, a_filt, a_smooth, mask=None, save_path=None):
  
     ax.set_xlabel("$a_1$", fontsize=12)
     ax.set_ylabel("$a_2$", fontsize=12)
-    ax.set_title("Imputation: Filter vs RTS Smoother", fontsize=14)
-    ax.legend(fontsize=10)
-    ax.grid(True, linestyle=":", alpha=0.4)
+    ax.set_title("Imputation: Filter vs RTS Smoother", fontsize=13, fontweight='bold', pad=15)
+    ax.legend(fontsize=9, loc='upper left', frameon=True, framealpha=0.9)
+    ax.grid(True, linestyle="--", alpha=0.3, zorder=0)
     ax.axis("equal")
- 
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
     plt.tight_layout()
     _save_or_show(fig, save_path)
- 
  
 def _save_or_show(fig, save_path):
     if save_path is not None:
