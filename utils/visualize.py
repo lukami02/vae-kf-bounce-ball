@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import imageio
 import os
 import sys
 sys.path.append("..")
@@ -370,6 +371,39 @@ def plot_imputation(a_mu, a_filt, a_smooth, mask=None, save_path=None):
     ax.spines['right'].set_visible(False)
     plt.tight_layout()
     _save_or_show(fig, save_path)
+
+def make_gif(ball_seq, obs_img, mask, save_path=None):
+    """
+    Visualize and save a bouncing-ball episode as a GIF
+
+    ball_seq:   [T, H, W]   — sequence of ball images
+    obs_img:    [H, W]      — static obstacle image
+    mask:       [T]         — binary mask (0 = masked timestep)
+    """
+    T = ball_seq.shape[0]
+    frames = []
+
+    for t in range(T):
+        ball = ball_seq[t]
+
+        H, W = ball.shape
+        frame = np.zeros((H, W, 3), dtype=float)
+
+        obstacle_mask = obs_img > 0
+        frame[obstacle_mask] = [1, 1, 1]
+        ball_intensity = ball
+
+        if mask[t] == 1:
+            color = np.array([1, 1, 1]) 
+        else:
+            color = np.array([1, 0, 0]) 
+
+        frame += ball_intensity[..., None] * color
+        frame = np.clip(frame, 0, 1)
+
+        frames.append((frame * 255).astype(np.uint8))
+    if save_path is not None:
+        imageio.mimsave(save_path, frames, fps=10)
  
 def _save_or_show(fig, save_path):
     if save_path is not None:
